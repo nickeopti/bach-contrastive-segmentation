@@ -16,7 +16,7 @@ class SamplesDataset(Dataset):
         self.cropper = RandomCrop(crop_size)
 
     def __len__(self):
-        return 1000
+        return 250
 
     def __getitem__(self, _) -> Tensor:
         return self.cropper(self.image)
