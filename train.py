@@ -68,7 +68,7 @@ class Model(pl.LightningModule):
         pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
         plot.plot_selected_crops(to_plot, path=f'{plots_path}/selection_{self.current_epoch}_{batch_idx}.png')
 
-        self.log('loss', loss)
+        self.log('loss', loss, on_step=True)
 
         return loss
 
