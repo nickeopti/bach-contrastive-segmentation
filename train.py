@@ -68,7 +68,7 @@ class Model(pl.LightningModule):
         pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
         plot.plot_selected_crops(to_plot, path=f'{plots_path}/selection_{self.current_epoch}_{batch_idx}.png')
 
-        self.log('loss', loss, on_step=True)
+        self.log('loss', loss)
 
         return loss
 
@@ -89,6 +89,7 @@ def train(epochs, model_checkpoint_path=None):
     trainer = pl.Trainer(
         max_epochs=epochs,
         logger=pl.loggers.CSVLogger('logs'),
+        log_every_n_steps=1,
         callbacks=[
             ModelCheckpoint(every_n_epochs=1)
         ]
