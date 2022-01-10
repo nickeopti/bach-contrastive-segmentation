@@ -51,7 +51,6 @@ class TypeNetwork:
             Conv2dBlock(in_channels, 8, kernel_size=3),
             Conv2dBlock(8, 8, kernel_size=3, stride=2, dilation=2, bias=False),
             Conv2dBlock(8, 1, kernel_size=3, stride=2, dilation=2, bias=False),
-            nn.ELU(),
             nn.Flatten(),
             nn.Linear(81, 32)
         )
