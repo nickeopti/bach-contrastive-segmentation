@@ -16,7 +16,7 @@ import plot
 
 def contrastive_areas(attention_map, size, stride=5):
     f = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=size, stride=stride, bias=False)
-    f.weight = nn.Parameter(torch.ones((1, 1, size, size), dtype=torch.int), requires_grad=False)
+    f.weight = nn.Parameter(torch.ones((1, 1, size, size), dtype=torch.int, device=attention_map.device), requires_grad=False)
 
     threshold = torch.quantile(attention_map, 0.9)
     activated = (attention_map > threshold).type(torch.int)
