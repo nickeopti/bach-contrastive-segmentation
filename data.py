@@ -8,18 +8,20 @@ from torchvision.transforms.transforms import Grayscale, RandomCrop
 
 
 class SamplesDataset(Dataset):
-    def __init__(self, image_path, crop_size=500) -> None:
+    def __init__(self, image_path, crop_size=500, epsilon=0.05) -> None:
         image = Image.open(image_path)
         image = ToTensor()(image)[:3]  # Discard the alpha band
         image = Grayscale(1)(image)
         self.image = image
         self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
 
     def __len__(self):
         return 250
 
     def __getitem__(self, _) -> Tensor:
-        return self.cropper(self.image)
+        image = self.cropper(self.image)
+        return (1 - self.epsilon) * image + self.epsilon
 
 
 def plotable(image):
