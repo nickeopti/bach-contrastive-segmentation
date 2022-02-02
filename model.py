@@ -26,7 +26,7 @@ class AttentionNetwork:
         for pd in (1, 2, 3, 5, 10, 20)
     ]
 
-    def __new__(cls, in_channels, internal_channels):
+    def __new__(cls, in_channels, internal_channels, out_channels):
         first_conv_block = Conv2dBlock(in_channels, internal_channels, **cls.conv2d_settings[0])
         residual_blocks = [
             ResidualBlock(nn.Sequential(
@@ -35,7 +35,7 @@ class AttentionNetwork:
             ))
             for kw in cls.conv2d_settings
         ]
-        last_conv_block = nn.Conv2d(internal_channels, 1, kernel_size=1, stride=1, padding=0)
+        last_conv_block = nn.Conv2d(internal_channels, out_channels, kernel_size=1, stride=1, padding=0)
 
         return nn.Sequential(
             first_conv_block,
