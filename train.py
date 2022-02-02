@@ -16,10 +16,10 @@ import plot
 
 def contrastive_areas(attention_map, size, stride=5):
     f = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=size, stride=stride, bias=False)
-    f.weight = nn.Parameter(torch.ones((1, 1, size, size), dtype=torch.int, device=attention_map.device), requires_grad=False)
+    f.weight = nn.Parameter(torch.ones((1, 1, size, size), dtype=torch.float, device=attention_map.device), requires_grad=False)
 
     threshold = torch.quantile(attention_map, 0.9)
-    activated = (attention_map > threshold).type(torch.int)
+    activated = (attention_map > threshold).type(torch.float)
     slide_sum = f(activated)
 
     _, _, rows, cols = torch.where(slide_sum > size**2 / 2)
@@ -41,7 +41,7 @@ class Model(pl.LightningModule):
         self.cos_multiple = nn.CosineSimilarity(dim=1)
 
     def training_step(self, batch, batch_idx):
-        loss = torch.zeros(1)
+        loss = torch.zeros(1, device=batch.device)
 
         attention_maps = self.attention_network(batch)
         to_plot = []
@@ -53,7 +53,7 @@ class Model(pl.LightningModule):
                 selected_crops = [p[i] for i in pos] + [n[i] for i in neg]
 
                 if len(to_plot) < 10:
-                    to_plot.append((image.detach(), attention_map.detach(), selected_crops))
+                    to_plot.append((image.detach().cpu(), attention_map.detach().cpu(), selected_crops))
 
                 cropped_images = torch.stack([image.squeeze()[row:row+size, col:col+size].unsqueeze(0) for row, col, size in selected_crops])
                 cropped_attenmaps = torch.stack([attention_map.squeeze()[row:row+size, col:col+size].unsqueeze(0) for row, col, size in selected_crops])
@@ -92,7 +92,8 @@ def train(epochs, model_checkpoint_path=None):
         log_every_n_steps=1,
         callbacks=[
             ModelCheckpoint(every_n_epochs=1)
-        ]
+        ],
+        gpus=1
     )
     trainer.fit(network, train_data_loader)
 
