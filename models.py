@@ -13,6 +13,8 @@ import plot
 class Model(pl.LightningModule):
     def __init__(self, contrastive_areas):
         super().__init__()
+        self.save_hyperparameters()
+
         self.attention_network = blocks.AttentionNetwork(1, 8, 2)
         self.classifier_network = blocks.TypeNetwork(1)
         self.cropper = RandomCrop(70)
