@@ -28,7 +28,7 @@ class Model(pl.LightningModule):
         attention_maps = self.attention_network(batch)
         to_plot = []
         for image, attention_map in zip(batch, attention_maps):
-            attended_image = (image * attention_map)
+            attended_image = image * attention_map
             p, n = self.contrastive_areas((attended_image).unsqueeze(0), 50, 20)
             if len(p) >= 5 and len(n) >= 5:
                 pos = np.random.choice(len(p), 2, replace=False)
@@ -36,27 +36,45 @@ class Model(pl.LightningModule):
                 selected_crops = [p[i] for i in pos] + [n[i] for i in neg]
 
                 if len(to_plot) < 10:
-                    to_plot.append((
-                        image.detach().cpu(),
-                        attention_map.squeeze().detach().cpu(),
-                        attended_image.detach().cpu(),
-                        selected_crops
-                    ))
+                    to_plot.append(
+                        (
+                            image.detach().cpu(),
+                            attention_map.squeeze().detach().cpu(),
+                            attended_image.detach().cpu(),
+                            selected_crops,
+                        )
+                    )
 
-                cropped_images = torch.stack([image.squeeze()[row:row+size, col:col+size].unsqueeze(0) for _, row, col, size in selected_crops])
-                cropped_attenmaps = torch.stack([attention_map.squeeze()[channel, row:row+size, col:col+size].unsqueeze(0) for channel, row, col, size in selected_crops])
+                cropped_images = torch.stack(
+                    [
+                        image.squeeze()[row : row + size, col : col + size].unsqueeze(0)
+                        for _, row, col, size in selected_crops
+                    ]
+                )
+                cropped_attenmaps = torch.stack(
+                    [
+                        attention_map.squeeze()[
+                            channel, row : row + size, col : col + size
+                        ].unsqueeze(0)
+                        for channel, row, col, size in selected_crops
+                    ]
+                )
 
-                predictions = self.classifier_network(cropped_images * cropped_attenmaps)
+                predictions = self.classifier_network(
+                    cropped_images * cropped_attenmaps
+                )
                 c = self.cos_single(predictions[0], predictions[1])
                 cc = self.cos_multiple(predictions[0], predictions[2:])
                 contrastive_loss = -torch.log(torch.exp(c) / torch.exp(cc).sum())
                 loss += contrastive_loss
 
-        plots_path = f'{self.logger.log_dir}/plots'
+        plots_path = f"{self.logger.log_dir}/plots"
         pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
-        plot.plot_selected_crops(to_plot, path=f'{plots_path}/selection_{self.current_epoch}_{batch_idx}.png')
+        plot.plot_selected_crops(
+            to_plot, path=f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"
+        )
 
-        self.log('loss', loss)
+        self.log("loss", loss)
 
         return loss
 

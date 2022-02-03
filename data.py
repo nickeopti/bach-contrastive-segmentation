@@ -28,8 +28,8 @@ def plotable(image):
     return torch.moveaxis(image, 0, -1)
 
 
-if __name__ == '__main__':
-    dataset = SamplesDataset('image.tiff')
+if __name__ == "__main__":
+    dataset = SamplesDataset("image.tiff")
 
     plt.imshow(plotable(dataset.image))
     plt.show()
