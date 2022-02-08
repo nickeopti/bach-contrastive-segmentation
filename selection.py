@@ -50,13 +50,7 @@ class SingleChannelQuantileSelector(ContrastiveRegionsQuantileSelector):
         slide_sum = self.f(activated)
 
         positives = self.transform_where_result_to_indices(0, torch.where(slide_sum > self.size**2 / 2))
-        # _, _, rows, cols = torch.where(slide_sum > self.size**2 / 2)
-        # positives = list(zip((rows*self.stride).tolist(), (cols*self.stride).tolist(), [self.size]*rows.numel()))
-
         negatives = self.transform_where_result_to_indices(0, torch.where(slide_sum < self.size**2 / 2))
-        # _, _, rows, cols = torch.where(slide_sum < self.size**2 / 2)
-        # negatives = list(zip((rows*self.stride).tolist(), (cols*self.stride).tolist(), [self.size]*rows.numel()))
-
         return positives, negatives
 
 
