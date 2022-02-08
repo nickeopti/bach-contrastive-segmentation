@@ -6,21 +6,27 @@ import torch
 import torch.nn as nn
 from torchvision.transforms.transforms import RandomCrop
 
-import blocks
 import plot
+from selection import ContrastiveSelector
 
 
 class Model(pl.LightningModule):
-    def __init__(self, contrastive_areas):
+    def __init__(
+        self,
+        contrastive_selector: ContrastiveSelector,
+        attention_network: nn.Module,
+        feature_network: nn.Module,
+    ):
         super().__init__()
         self.save_hyperparameters()
 
-        self.attention_network = blocks.AttentionNetwork(1, 8, 2)
-        self.classifier_network = blocks.TypeNetwork(1)
+        self.selector = contrastive_selector
+        self.attention_network = attention_network
+        self.feature_network = feature_network
+
         self.cropper = RandomCrop(70)
         self.cos_single = nn.CosineSimilarity(dim=0)
         self.cos_multiple = nn.CosineSimilarity(dim=1)
-        self.contrastive_areas = contrastive_areas
 
     def training_step(self, batch, batch_idx):
         loss = torch.zeros(1, device=batch.device)
@@ -29,7 +35,7 @@ class Model(pl.LightningModule):
         to_plot = []
         for image, attention_map in zip(batch, attention_maps):
             attended_image = image * attention_map
-            p, n = self.contrastive_areas((attended_image).unsqueeze(0), 50, 20)
+            p, n = self.selector.select((attended_image).unsqueeze(0))
             if len(p) >= 5 and len(n) >= 5:
                 pos = np.random.choice(len(p), 2, replace=False)
                 neg = np.random.choice(len(n), min(32, len(n)), replace=False)
@@ -39,7 +45,7 @@ class Model(pl.LightningModule):
                     to_plot.append(
                         (
                             image.detach().cpu(),
-                            attention_map.squeeze().detach().cpu(),
+                            attention_map.detach().cpu(),
                             attended_image.detach().cpu(),
                             selected_crops,
                         )
@@ -53,14 +59,14 @@ class Model(pl.LightningModule):
                 )
                 cropped_attenmaps = torch.stack(
                     [
-                        attention_map.squeeze()[
+                        attention_map[
                             channel, row : row + size, col : col + size
                         ].unsqueeze(0)
                         for channel, row, col, size in selected_crops
                     ]
                 )
 
-                predictions = self.classifier_network(
+                predictions = self.feature_network(
                     cropped_images * cropped_attenmaps
                 )
                 c = self.cos_single(predictions[0], predictions[1])
