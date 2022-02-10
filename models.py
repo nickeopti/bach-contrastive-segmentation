@@ -1,4 +1,5 @@
 import pathlib
+from typing import List
 
 import numpy as np
 import pytorch_lightning as pl
@@ -7,13 +8,13 @@ import torch.nn as nn
 from torchvision.transforms.transforms import RandomCrop
 
 import plot
-from selection import ContrastiveSelector
+from selection import Region, RegionSelector
 
 
 class Model(pl.LightningModule):
     def __init__(
         self,
-        contrastive_selector: ContrastiveSelector,
+        contrastive_selector: RegionSelector,
         attention_network: nn.Module,
         feature_network: nn.Module,
     ):
@@ -39,7 +40,7 @@ class Model(pl.LightningModule):
             if len(p) >= 5 and len(n) >= 5:
                 pos = np.random.choice(len(p), 2, replace=False)
                 neg = np.random.choice(len(n), min(32, len(n)), replace=False)
-                selected_crops = [p[i] for i in pos] + [n[i] for i in neg]
+                selected_crops: List[Region] = [p[i] for i in pos] + [n[i] for i in neg]
 
                 if len(to_plot) < 10:
                     to_plot.append(
@@ -53,16 +54,16 @@ class Model(pl.LightningModule):
 
                 cropped_images = torch.stack(
                     [
-                        image.squeeze()[row : row + size, col : col + size].unsqueeze(0)
-                        for _, row, col, size in selected_crops
+                        image.squeeze()[region.row:region.row + region.size, region.col:region.col + region.size].unsqueeze(0)
+                        for region in selected_crops
                     ]
                 )
                 cropped_attenmaps = torch.stack(
                     [
                         attention_map[
-                            channel, row : row + size, col : col + size
+                            region.channel, region.row:region.row + region.size, region.col:region.col + region.size
                         ].unsqueeze(0)
-                        for channel, row, col, size in selected_crops
+                        for region in selected_crops
                     ]
                 )
 

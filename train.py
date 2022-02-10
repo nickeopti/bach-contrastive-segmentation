@@ -15,9 +15,10 @@ import selection
 
 
 def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.ClassArguments]:
-    available_selectors: List[selection.ContrastiveSelector] = [
+    available_selectors: List[selection.RegionSelector] = [
         selection.SingleChannelQuantileSelector,
         selection.MultiChannelQuantileSelector,
+        selection.UniformRandomSelector,
     ]
     available_attention_networks: List[torch.nn.Module] = [
         blocks.AttentionNetwork
