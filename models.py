@@ -30,50 +30,40 @@ class Model(pl.LightningModule):
         self.cos_multiple = nn.CosineSimilarity(dim=1)
 
     def training_step(self, batch, batch_idx):
+        to_plot = []
+
         loss = torch.zeros(1, device=batch.device)
 
         attention_maps = self.attention_network(batch)
-        to_plot = []
         for image, attention_map in zip(batch, attention_maps):
             attended_image = image * attention_map
             p, n = self.selector.select((attended_image).unsqueeze(0))
-            if len(p) >= 5 and len(n) >= 5:
-                pos = np.random.choice(len(p), 2, replace=False)
-                neg = np.random.choice(len(n), min(32, len(n)), replace=False)
-                selected_crops: List[Region] = [p[i] for i in pos] + [n[i] for i in neg]
+            if len(p) < 5 or len(n) < 5:
+                continue  # Not enough regions to contrast against each other
 
-                if len(to_plot) < 10:
-                    to_plot.append(
-                        (
-                            image.detach().cpu(),
-                            attention_map.detach().cpu(),
-                            attended_image.detach().cpu(),
-                            selected_crops,
-                        )
-                    )
+            pos = np.random.choice(len(p), 2, replace=False)
+            neg = np.random.choice(len(n), min(32, len(n)), replace=False)
+            selected_crops: List[Region] = [p[i] for i in pos] + [n[i] for i in neg]
 
-                cropped_images = torch.stack(
-                    [
-                        image.squeeze()[region.row:region.row + region.size, region.col:region.col + region.size].unsqueeze(0)
-                        for region in selected_crops
-                    ]
-                )
-                cropped_attenmaps = torch.stack(
-                    [
-                        attention_map[
-                            region.channel, region.row:region.row + region.size, region.col:region.col + region.size
-                        ].unsqueeze(0)
-                        for region in selected_crops
-                    ]
-                )
+            attended_image_crops = torch.stack(
+                [
+                    attended_image[region.channel, region.row:region.row + region.size, region.col:region.col + region.size].unsqueeze(0)
+                    for region in selected_crops
+                ]
+            )
+            predictions = self.feature_network(attended_image_crops)
 
-                predictions = self.feature_network(
-                    cropped_images * cropped_attenmaps
-                )
-                c = self.cos_single(predictions[0], predictions[1])
-                cc = self.cos_multiple(predictions[0], predictions[2:])
-                contrastive_loss = -torch.log(torch.exp(c) / torch.exp(cc).sum())
-                loss += contrastive_loss
+            c = self.cos_single(predictions[0], predictions[1])
+            cc = self.cos_multiple(predictions[0], predictions[2:])
+            contrastive_loss = -torch.log(torch.exp(c) / torch.exp(cc).sum())
+            loss += contrastive_loss
+
+            to_plot.append((
+                image.detach().cpu(),
+                attention_map.detach().cpu(),
+                attended_image.detach().cpu(),
+                selected_crops,
+            ))
 
         plots_path = f"{self.logger.log_dir}/plots"
         pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
