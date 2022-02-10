@@ -19,6 +19,7 @@ def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.Cla
         selection.SingleChannelQuantileSelector,
         selection.MultiChannelQuantileSelector,
         selection.UniformRandomSelector,
+        selection.SingleChannelSortedAttentionSelector,
     ]
     available_attention_networks: List[torch.nn.Module] = [
         blocks.AttentionNetwork

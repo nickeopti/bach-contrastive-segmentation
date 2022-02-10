@@ -99,3 +99,15 @@ class UniformRandomSelector(RegionSelector):
             for row, col in zip(negatives_rows, negatives_cols)
         ]
         return positives, negatives
+
+
+class SingleChannelSortedAttentionSelector(AttentionBasedRegionSelector):
+    def __init__(self, size: int = 50, stride: int = 20, n_positives: int = 30, device=None) -> None:
+        super().__init__(size, stride, device)
+        self.n_positives = n_positives
+
+    def select(self, attended_image) -> Sequence[Collection[Region]]:
+        attentions = self.f(attended_image)
+        regions = self.transform(attentions, torch.where(torch.ones_like(attentions)))
+        sorted_regions = list(sorted(regions, key=lambda r: r.attention, reverse=True))
+        return sorted_regions[:self.n_positives], sorted_regions[self.n_positives:]
