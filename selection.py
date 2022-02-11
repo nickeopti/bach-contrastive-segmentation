@@ -68,7 +68,10 @@ class MultiChannelQuantileSelector(ContrastiveRegionsQuantileSelector):
         super().__init__(size, stride, quantile, device)
 
     def select(self, attended_image):
-        attentions = torch.stack([(self.f((channel > torch.quantile(channel, self.quantile)).type(torch.float).unsqueeze(0).unsqueeze(0))).squeeze() for channel in attended_image[0]]).unsqueeze(0)  # assuming batch size of 1
+        attentions = torch.stack([
+            (self.f((channel > torch.quantile(channel, self.quantile)).type(torch.float).unsqueeze(0).unsqueeze(0))).squeeze()
+            for channel in attended_image[0]
+        ]).unsqueeze(0)  # assuming batch size of 1
         l = self.transform(attentions, torch.where(attentions > self.size ** 2 / 2))
         return [
             [region for region in l if region.channel == i]
@@ -109,5 +112,17 @@ class SingleChannelSortedAttentionSelector(AttentionBasedRegionSelector):
     def select(self, attended_image) -> Sequence[Collection[Region]]:
         attentions = self.f(attended_image)
         regions = self.transform(attentions, torch.where(torch.ones_like(attentions)))
-        sorted_regions = list(sorted(regions, key=lambda r: r.attention, reverse=True))
+        sorted_regions = list(sorted(regions, key=lambda region: region.attention, reverse=True))
         return sorted_regions[:self.n_positives], sorted_regions[self.n_positives:]
+
+
+class MultiChannelSortedAttentionSelector(AttentionBasedRegionSelector):
+    def __init__(self, size: int = 50, stride: int = 20, n_positives: int = 30, device=None) -> None:
+        super().__init__(size, stride, device)
+        self.n_positives = n_positives
+
+    def select(self, attended_image) -> Sequence[Collection[Region]]:
+        channel_attentions = [self.f(channel.unsqueeze(0).unsqueeze(0)) for channel in attended_image[0]]  # Assuming batch size of 1
+        channel_regions = [self.transform(attention, torch.where(torch.ones_like(attention))) for attention in channel_attentions]
+        channel_sorted_regions = [list(sorted(regions, key=lambda region: region.attention, reverse=True)) for regions in channel_regions]
+        return [sorted_regions[:self.n_positives] for sorted_regions in channel_sorted_regions]
