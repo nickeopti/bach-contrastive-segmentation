@@ -1,7 +1,8 @@
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Collection, Sequence
+from typing import Any, Collection, List, Sequence, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -14,6 +15,99 @@ class Region:
 
     size: int
     attention: float
+
+
+Regions = List[Region]
+Contrastive = Tuple[Regions, Regions]
+
+
+@dataclass
+class ContrastiveRegions:
+    positives: Regions
+    negatives: Regions
+
+
+class Filterer:
+    def preprocess(self, values: torch.Tensor) -> torch.Tensor:
+        return values  # default to noop
+
+    @abstractmethod
+    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
+        pass
+
+
+class Sampler:
+    def __init__(self, n_positives: int = 10, n_negatives: int = 10) -> None:
+        self.n_positives = n_positives
+        self.n_negatives = n_negatives
+
+    @abstractmethod
+    def sample(self, values: List[List[ContrastiveRegions]]) -> Tuple[List[List[Regions]], List[List[Regions]]]:
+        pass
+
+
+class NoFilterer(Filterer):
+    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
+        return [
+            [
+                ContrastiveRegions(channel, channel)
+                for channel in image
+            ]
+            for image in values
+        ]
+
+
+class SortedFilterer(Filterer):
+    def __init__(self, n_positives_filter: int = 50) -> None:
+        super().__init__()
+        self.n_positives = n_positives_filter
+
+    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
+        sorted_values = [
+            [
+                list(sorted(channel, key=lambda region: region.attention, reverse=True))
+                for channel in image
+            ]
+            for image in values
+        ]
+        return [
+            [
+                ContrastiveRegions(channel[:self.n_positives], channel[self.n_positives:])
+                for channel in image
+            ]
+            for image in sorted_values
+        ]
+
+
+class UniformSampler(Sampler):
+    def sample(self, values: List[List[ContrastiveRegions]]) -> Tuple[List[List[Regions]], List[List[Regions]]]:
+        # res = [[None] * len(values)]
+        # for image_index, image in enumerate(values):
+        #     for channel_index, channel in enumerate(image):
+        #         positive_indices = np.random.choice(self.n_positives, replace=False)
+        #         negative_indices = np.random.choice(self.n_negatives, replace=False)
+
+        #         positives = [channel.positives[i] for i in positive_indices]
+        #         negatives = [channel.negatives[i] for i in negative_indices]
+
+        #         res[image_index][channel_index] = ContrastiveRegions(positives, negatives)
+
+        positives = [
+            [
+                [channel.positives[i] for i in np.random.choice(len(channel.positives), self.n_positives, replace=False)]
+                for channel in image
+            ]
+            for image in values
+        ]
+        negatives = [
+            [
+                [channel.negatives[i] for i in np.random.choice(len(channel.negatives), self.n_negatives, replace=False)]
+                for channel in image
+            ]
+            for image in values
+        ]
+
+        return positives, negatives
 
 
 class RegionSelector:
