@@ -1,4 +1,6 @@
+import itertools
 import pathlib
+import threading
 from typing import List
 
 import numpy as np
@@ -37,39 +39,51 @@ class Model(pl.LightningModule):
         attention_maps = self.attention_network(batch)
         for image, attention_map in zip(batch, attention_maps):
             attended_image = image * attention_map
-            p, n = self.selector.select((attended_image).unsqueeze(0))
-            if len(p) < 5 or len(n) < 5:
+
+            classes = self.selector.select((attended_image).unsqueeze(0))
+            if any(len(c) < 2 for c in classes):
                 continue  # Not enough regions to contrast against each other
 
-            pos = np.random.choice(len(p), 2, replace=False)
-            neg = np.random.choice(len(n), min(32, len(n)), replace=False)
-            selected_crops: List[Region] = [p[i] for i in pos] + [n[i] for i in neg]
+            n_chosen_regions_in_each_class = 10
+            class_indices = [min(n_chosen_regions_in_each_class, len(c)) for c in classes]
+            class_indices = [(sum(class_indices[:i]), sum(class_indices[:i+1])) for i in range(len(class_indices))]
+
+            t = [
+                [c[i] for i in np.random.choice(len(c), min(n_chosen_regions_in_each_class, len(c)), replace=False)]
+                for c in classes
+            ]
+            selected_classes = list(itertools.chain(*t))
 
             attended_image_crops = torch.stack(
                 [
                     attended_image[region.channel, region.row:region.row + region.size, region.col:region.col + region.size].unsqueeze(0)
-                    for region in selected_crops
+                    for region in selected_classes
                 ]
             )
             predictions = self.feature_network(attended_image_crops)
 
-            c = self.cos_single(predictions[0], predictions[1])
-            cc = self.cos_multiple(predictions[0], predictions[2:])
-            contrastive_loss = -torch.log(torch.exp(c) / torch.exp(cc).sum())
-            loss += contrastive_loss
+            for ci_from, ci_to in class_indices:
+                i1, i2 = np.random.choice(ci_to-ci_from, 2, replace=False)
+                p1 = predictions[ci_from+i1]
+                p2 = predictions[ci_from+i2]
+                c = self.cos_single(p1, p2)
+                rest = torch.vstack((predictions[:ci_from], predictions[ci_to:]))
+                cc = self.cos_multiple(p1, rest)
+                contrastive_loss = -torch.log(torch.exp(c) / torch.exp(cc).sum())
+                loss += contrastive_loss
 
             to_plot.append((
                 image.detach().cpu(),
                 attention_map.detach().cpu(),
                 attended_image.detach().cpu(),
-                selected_crops,
+                selected_classes,
+                class_indices,
             ))
 
         plots_path = f"{self.logger.log_dir}/plots"
         pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
-        plot.plot_selected_crops(
-            to_plot, path=f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"
-        )
+        plot_thread = threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"))
+        plot_thread.start()
 
         self.log("loss", loss)
 
