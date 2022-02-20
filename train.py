@@ -22,6 +22,16 @@ def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.Cla
         selection.SingleChannelSortedAttentionSelector,
         selection.MultiChannelSortedAttentionSelector,
     ]
+    available_filterers: List[selection.Filterer] = [
+        selection.SortedFilterer,
+        selection.NoFilterer,
+        selection.ThresholdFilterer,
+        selection.QuantileFilterer,
+    ]
+    available_samplers: List[selection.Sampler] = [
+        selection.UniformSampler,
+        selection.ProbabilisticSampler,
+    ]
     available_attention_networks: List[torch.nn.Module] = [
         blocks.AttentionNetwork
     ]
@@ -29,7 +39,9 @@ def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.Cla
         blocks.TypeNetwork
     ]
     options = {
-        "contrastive_selector": available_selectors,
+        # "contrastive_selector": available_selectors,
+        "filterer": available_filterers,
+        "sampler": available_samplers,
         "attention_network": available_attention_networks,
         "feature_network": available_feature_networks,
     }
@@ -51,7 +63,7 @@ def create_trainer(args) -> pl.Trainer:
 
 
 def train(model, trainer, args):
-    dataset = data.SamplesDataset(args.dataset)
+    dataset = data.SamplesDataset(args.dataset, crop_size=1000)
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     try:
@@ -78,8 +90,12 @@ if __name__ == "__main__":
 
     successfully_started = False
     while not successfully_started:
-        model_parameters["contrastive_selector"].arguments["device"] = trainer.accelerator.root_device
-        model = models.Model(**{parameter: ca.class_type(**ca.arguments) for parameter, ca in model_parameters.items()})
+        # model_parameters["contrastive_selector"].arguments["device"] = trainer.accelerator.root_device
+        model = models.Model(
+            counter=models.Counter(args.out_channels, 50, 20),
+            inter_channel_loss_scaling_factor=1,
+            **{parameter: ca.class_type(**ca.arguments) for parameter, ca in model_parameters.items()}
+        )
 
         if args.model_checkpoint is not None:
             model.load_from_checkpoint(args.model_checkpoint)
