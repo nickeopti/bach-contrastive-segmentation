@@ -60,3 +60,30 @@ def plot_selected_crops(data, path=None):
         fig.tight_layout()
         fig.savefig(path, dpi=300)
     plt.close()
+
+
+def plot_histograms(data, path=None):
+    if len(data) <= 1:
+        return
+
+    n = min(len(data), 10)
+    n_channels = len(data[1][1])
+    fig, axs = plt.subplots(
+        1 + 2 * n_channels, n, figsize=(n, 1 + 2 * n_channels)
+    )
+    for i, (image, attended_image, attentions) in enumerate(data[:n]):
+        axs[0][i].imshow(plotable(image))
+        axs[0][i].axis("off")
+        for j, attended_channel in enumerate(attended_image, start=1):
+            axs[j][i].imshow(plotable(attended_channel))
+            axs[j][i].axis("off")
+        for j, channel_attentions in enumerate(attentions, start=1+n_channels):
+            axs[j][i].hist(channel_attentions, bins=20)
+            axs[j][i].axis("off")
+
+    if path is None:
+        plt.show()
+    else:
+        fig.tight_layout()
+        fig.savefig(path, dpi=300)
+    plt.close()
