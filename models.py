@@ -9,8 +9,7 @@ import torch
 import torch.nn as nn
 
 import plot
-from selection import ContrastiveRegions, Filterer, Region, RegionSelector, Sampler
-
+from selection import Filterer, Region, Sampler
 
 Image = List
 Channel = List
@@ -63,9 +62,6 @@ class Counter(nn.Module):
         ]
         images_regions = [[list(itertools.chain(*channel)) for channel in image] for image in image_counts]
         return images_regions
-    
-    def transform_to_regions(self, regions: torch.Tensor, where: ContrastiveRegions) -> ContrastiveRegions:
-        pass
 
 
 class Model(pl.LightningModule):
