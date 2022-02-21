@@ -15,13 +15,6 @@ import selection
 
 
 def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.ClassArguments]:
-    available_selectors: List[selection.RegionSelector] = [
-        selection.SingleChannelQuantileSelector,
-        selection.MultiChannelQuantileSelector,
-        selection.UniformRandomSelector,
-        selection.SingleChannelSortedAttentionSelector,
-        selection.MultiChannelSortedAttentionSelector,
-    ]
     available_filterers: List[selection.Filterer] = [
         selection.SortedFilterer,
         selection.NoFilterer,
@@ -90,7 +83,6 @@ if __name__ == "__main__":
 
     successfully_started = False
     while not successfully_started:
-        # model_parameters["contrastive_selector"].arguments["device"] = trainer.accelerator.root_device
         model = models.Model(
             counter=models.Counter(args.out_channels, 50, 20),
             inter_channel_loss_scaling_factor=1,
