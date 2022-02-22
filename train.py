@@ -56,7 +56,7 @@ def create_trainer(args) -> pl.Trainer:
 
 
 def train(model, trainer, args):
-    dataset = data.SamplesDataset(args.dataset, crop_size=1000)
+    dataset = data.SamplesDataset(args.dataset, crop_size=2000)
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     try:
