@@ -21,9 +21,8 @@ Contrastive = Tuple[Regions, Regions]
 
 
 class Sampler:
-    def __init__(self, n_positives: int = 10, n_negatives: int = 10) -> None:
-        self.n_positives = n_positives
-        self.n_negatives = n_negatives
+    def __init__(self, n: int = 10) -> None:
+        self.n = n
 
     @abstractmethod
     def sample(self, values: torch.Tensor) -> torch.Tensor:
@@ -36,8 +35,8 @@ class UniformSampler(Sampler):
 
 
 class ProbabilisticSampler(Sampler):
-    def __init__(self, n_positives: int = 10, n_negatives: int = 10, alpha: float = 1, beta: float = 0.5) -> None:
-        super().__init__(n_positives, n_negatives)
+    def __init__(self, n: int = 10, alpha: float = 1, beta: float = 0.5) -> None:
+        super().__init__(n)
         self.alpha = alpha
         self.beta = beta
 
@@ -69,8 +68,8 @@ class ProbabilisticSampler(Sampler):
 
 
 class TopKSampler(Sampler):
-    def __init__(self, n_positives: int = 10, n_negatives: int = 10, k: int = 50) -> None:
-        super().__init__(n_positives, n_negatives)
+    def __init__(self, n: int = 10, k: int = 50) -> None:
+        super().__init__(n)
         self.k = k
     
     def sample(self, values: torch.Tensor) -> torch.Tensor:
