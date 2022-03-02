@@ -2,7 +2,6 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Tuple
 
-import numpy as np
 import torch
 
 
@@ -35,17 +34,15 @@ class UniformSampler(Sampler):
 
 
 class ProbabilisticSampler(Sampler):
-    def __init__(self, n: int = 10, alpha: float = 1, beta: float = 0.5) -> None:
+    def __init__(self, n: int = 10, alpha: float = 1) -> None:
         super().__init__(n)
         self.alpha = alpha
-        self.beta = beta
 
     def sample(self, values: torch.Tensor) -> torch.Tensor:
         maxes = values.max(dim=-1, keepdim=True).values
         normalised_values = values / maxes
         
         exponentiated_values = normalised_values ** self.alpha
-        # exponentiated_values = torch.sigmoid((normalised_values + self.beta) / self.alpha)
 
         sums = exponentiated_values.sum(dim=-1, keepdim=True)
         probabilities_positives = exponentiated_values / sums
