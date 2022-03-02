@@ -15,15 +15,10 @@ import selection
 
 
 def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.ClassArguments]:
-    available_filterers: List[selection.Filterer] = [
-        selection.SortedFilterer,
-        selection.NoFilterer,
-        selection.ThresholdFilterer,
-        selection.QuantileFilterer,
-    ]
     available_samplers: List[selection.Sampler] = [
         selection.UniformSampler,
         selection.ProbabilisticSampler,
+        selection.TopKSampler,
     ]
     available_attention_networks: List[torch.nn.Module] = [
         blocks.AttentionNetwork
@@ -32,8 +27,6 @@ def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.Cla
         blocks.TypeNetwork
     ]
     options = {
-        # "contrastive_selector": available_selectors,
-        "filterer": available_filterers,
         "sampler": available_samplers,
         "attention_network": available_attention_networks,
         "feature_network": available_feature_networks,
@@ -56,7 +49,7 @@ def create_trainer(args) -> pl.Trainer:
 
 
 def train(model, trainer, args):
-    dataset = data.SamplesDataset(args.dataset, crop_size=2000)
+    dataset = data.SamplesDataset(args.dataset, crop_size=500)
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     try:
@@ -65,8 +58,6 @@ def train(model, trainer, args):
         if "element 0 of tensors does not require grad" not in str(exc):
             raise exc
 
-    return trainer.log_dir
-
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -74,6 +65,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_checkpoint", type=str)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--gamma", type=float, default=1)
 
     model_parameters = parse_model_arguments(parser)
     parser = pl.Trainer.add_argparse_args(parser)
@@ -86,6 +78,7 @@ if __name__ == "__main__":
         model = models.Model(
             counter=models.Counter(args.out_channels, 50, 20),
             inter_channel_loss_scaling_factor=1,
+            gamma=args.gamma,
             **{parameter: ca.class_type(**ca.arguments) for parameter, ca in model_parameters.items()}
         )
 

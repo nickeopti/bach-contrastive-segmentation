@@ -20,175 +20,84 @@ Regions = List[Region]
 Contrastive = Tuple[Regions, Regions]
 
 
-@dataclass
-class ContrastiveRegions:
-    positives: Regions
-    negatives: Regions
-
-
-class Filterer:
-    def preprocess(self, values: torch.Tensor) -> torch.Tensor:
-        return values  # default to noop
-
-    @abstractmethod
-    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
-        pass
-
-
 class Sampler:
     def __init__(self, n_positives: int = 10, n_negatives: int = 10) -> None:
         self.n_positives = n_positives
         self.n_negatives = n_negatives
 
     @abstractmethod
-    def sample(self, values: List[List[ContrastiveRegions]]) -> Tuple[List[List[Regions]], List[List[Regions]]]:
+    def sample(self, values: torch.Tensor) -> torch.Tensor:
         pass
 
 
-class NoFilterer(Filterer):
-    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
-        return [
-            [
-                ContrastiveRegions(channel, channel)
-                for channel in image
-            ]
-            for image in values
-        ]
-
-
-class ThresholdFilterer(Filterer):
-    def __init__(self, threshold: float = 0.5, normalised: bool = True) -> None:
-        self.threshold = threshold
-        self.normalised = normalised
-
-    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
-        normalisation_factor = values[0][0][0].size ** 2 if self.normalised else 1
-        return [
-            [
-                ContrastiveRegions(
-                    [region for region in channel if region.attention > self.threshold * normalisation_factor],
-                    [region for region in channel if region.attention < self.threshold * normalisation_factor]
-                )
-                for channel in image
-            ]
-            for image in values
-        ]
-
-
-class QuantileFilterer(ThresholdFilterer):
-    def __init__(self, threshold: float = 0.5, normalised: bool = True, quantile: float = 0.9) -> None:
-        super().__init__(threshold, normalised)
-        self.quantile = quantile
-
-    def preprocess(self, values: torch.Tensor) -> torch.Tensor:
-        b, c, *_ = values.shape
-        quantiles = [
-            torch.quantile(image.flatten(start_dim=-2), q=self.quantile, dim=-1)
-            for image in values
-        ]
-
-        result = values.clone()
-        for i in range(b):
-            for j in range(c):
-                result[i, j] = (values[i, j] >= quantiles[i][j]).type(values.type())
-        return result
-
-
-class SortedFilterer(Filterer):
-    def __init__(self, n_positives_filter: int = 50) -> None:
-        super().__init__()
-        self.n_positives = n_positives_filter
-
-    def filter(self, values: List[List[Regions]]) -> List[List[ContrastiveRegions]]:
-        sorted_values = [
-            [
-                list(sorted(channel, key=lambda region: region.attention, reverse=True))
-                for channel in image
-            ]
-            for image in values
-        ]
-        return [
-            [
-                ContrastiveRegions(channel[:self.n_positives], channel[self.n_positives:])
-                for channel in image
-            ]
-            for image in sorted_values
-        ]
-
-
 class UniformSampler(Sampler):
-    def sample(self, values: List[List[ContrastiveRegions]]) -> Tuple[List[List[Regions]], List[List[Regions]]]:
-        positives = [
-            [
-                [
-                    channel.positives[i] for i in (
-                        np.random.choice(len(channel.positives), self.n_positives, replace=True)
-                        if len(channel.positives) > 0 else []
-                    )
-                ]
-                for channel in image
-            ]
-            for image in values
-        ]
-        negatives = [
-            [
-                [
-                    channel.negatives[i] for i in (
-                        np.random.choice(len(channel.negatives), self.n_negatives, replace=True)
-                        if len(channel.negatives) else []
-                    )
-                ]
-                for channel in image
-            ]
-            for image in values
-        ]
-
-        return positives, negatives
+    def sample(self, values: torch.Tensor) -> torch.Tensor:
+        return torch.randint(low=0, high=values.shape[-1], size=(values.shape[0], 2, values.shape[1], self.n_positives))
 
 
 class ProbabilisticSampler(Sampler):
-    def sample(self, values: List[List[ContrastiveRegions]]) -> Tuple[List[List[Regions]], List[List[Regions]]]:
-        # Currently assumes that positives and negatives in each ContrastiveRegions are identical
-        activations = [
+    def __init__(self, n_positives: int = 10, n_negatives: int = 10, alpha: float = 1, beta: float = 0.5) -> None:
+        super().__init__(n_positives, n_negatives)
+        self.alpha = alpha
+        self.beta = beta
+
+    def sample(self, values: torch.Tensor) -> torch.Tensor:
+        maxes = values.max(dim=-1, keepdim=True).values
+        normalised_values = values / maxes
+        
+        exponentiated_values = normalised_values ** self.alpha
+        # exponentiated_values = torch.sigmoid((normalised_values + self.beta) / self.alpha)
+
+        sums = exponentiated_values.sum(dim=-1, keepdim=True)
+        probabilities_positives = exponentiated_values / sums
+        probabilities_negatives = (1 - probabilities_positives) / (probabilities_positives.shape[-1] - 1)
+
+        indices_positives = torch.stack(
             [
-                np.array([region.attention for region in channel.positives])
-                for channel in image
+                torch.multinomial(image, self.n_positives, replacement=True)
+                for image in probabilities_positives
             ]
-            for image in values
-        ]
-        sums = [
+        )
+        indices_negatives = torch.stack(
             [
-                channel.sum()
-                for channel in image
+                torch.multinomial(image, self.n_negatives, replacement=True)
+                for image in probabilities_negatives
             ]
-            for image in activations
-        ]
-        positive_probabilities = [
+        )
+
+        return torch.stack((indices_positives, indices_negatives)).permute(1, 0, 2, 3)
+
+
+class TopKSampler(Sampler):
+    def __init__(self, n_positives: int = 10, n_negatives: int = 10, k: int = 50) -> None:
+        super().__init__(n_positives, n_negatives)
+        self.k = k
+    
+    def sample(self, values: torch.Tensor) -> torch.Tensor:
+        top_k_positive_indices = torch.topk(values, k=self.k, dim=-1).indices
+        top_k_negative_indices = torch.topk(-values, k=values.shape[-1] - self.k, dim=-1).indices
+
+        indices_positives = torch.stack(
             [
-                channel_activations / channel_sum
-                for channel_activations, channel_sum in zip(image_activations, image_sums)
+                torch.stack(
+                    [
+                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n_positives,))]
+                        for channel in image
+                    ]
+                )
+                for image in top_k_positive_indices
             ]
-            for image_activations, image_sums in zip(activations, sums)
-        ]
-        negative_probabilities = [
+        )
+        indices_negatives = torch.stack(
             [
-                (1 - channel) / (len(channel) - channel.sum())
-                for channel in image
+                torch.stack(
+                    [
+                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n_negatives,))]
+                        for channel in image
+                    ]
+                )
+                for image in top_k_negative_indices
             ]
-            for image in positive_probabilities
-        ]
-        positives = [
-            [
-                [channel.positives[i] for i in np.random.choice(len(channel.positives), self.n_positives, replace=False, p=channel_probabilities)]
-                for channel, channel_probabilities in zip(image, image_probabilities)
-            ]
-            for image, image_probabilities in zip(values, positive_probabilities)
-        ]
-        negatives = [
-            [
-                [channel.negatives[i] for i in np.random.choice(len(channel.negatives), self.n_negatives, replace=False, p=channel_probabilities)]
-                for channel, channel_probabilities in zip(image, image_probabilities)
-            ]
-            for image, image_probabilities in zip(values, negative_probabilities)
-        ]
-        return positives, negatives
+        )
+
+        return torch.stack((indices_positives, indices_negatives)).permute(1, 0, 2, 3)

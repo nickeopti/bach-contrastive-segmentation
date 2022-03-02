@@ -1,7 +1,6 @@
-import itertools
 import pathlib
 import threading
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -9,7 +8,7 @@ import torch
 import torch.nn as nn
 
 import plot
-from selection import Filterer, Region, Sampler
+from selection import Region, Sampler
 
 Image = List
 Channel = List
@@ -39,46 +38,26 @@ class Counter(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.f(x)
     
-    def count(self, x: torch.Tensor) -> List[List[List[Region]]]:
-        counts = self(x)
-        image_counts = [
-            [
-                [
-                    [
-                        Region(
-                            row=row_index * self.stride,
-                            col=column_index * self.stride,
-                            channel=channel_index,
-                            size=self.kernel_size,
-                            attention=element.item()
-                        )
-                        for column_index, element in enumerate(row)
-                    ]
-                    for row_index, row in enumerate(channel)
-                ]
-                for channel_index, channel in enumerate(image)
-            ]
-            for image in counts
-        ]
-        images_regions = [[list(itertools.chain(*channel)) for channel in image] for image in image_counts]
-        return images_regions
+    def count(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Size]:
+        counts: torch.Tensor = self(x)
+        return counts.flatten(start_dim=-2), counts.shape
 
 
 class Model(pl.LightningModule):
     def __init__(
         self,
         counter: Counter,
-        filterer: Filterer,
         sampler: Sampler,
         attention_network: nn.Module,
         feature_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
+        gamma: float = 1,
+        make_histograms: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
 
         self.counter = counter
-        self.filterer = filterer
         self.sampler = sampler
 
         self.attention_network = attention_network
@@ -87,43 +66,47 @@ class Model(pl.LightningModule):
         self.cos_single = nn.CosineSimilarity(dim=0)
         self.cos_multiple = nn.CosineSimilarity(dim=1)
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
+        self.gamma = gamma
+
+        self.make_histograms = make_histograms
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         images = batch
         attention_maps = self.attention_network(images)
         attended_images = images * attention_maps
 
-        attentions = self.filterer.preprocess(attended_images)
-        regions = self.counter.count(attentions)
-        filtered_regions = self.filterer.filter(regions)
-
-        sampled_positive_regions, \
-        sampled_negative_regions = self.sampler.sample(filtered_regions)
+        regions, count_shape = self.counter.count(attended_images)
+        sampled_regions = self.sampler.sample(regions)
+        sampled_regions_rows: torch.Tensor = torch.div(sampled_regions, count_shape[-1], rounding_mode='trunc') * self.counter.stride
+        sampled_regions_cols: torch.Tensor = (sampled_regions % count_shape[-1]) * self.counter.stride
 
         loss = torch.zeros(1, device=batch.device)
-        for attended_image, positive_regions, negative_regions in zip(attended_images, sampled_positive_regions, sampled_negative_regions):
-            if any(len(r) < 2 for r in positive_regions + negative_regions):
+        regulariser = (0.5 - torch.abs(attention_maps - 0.5)).sum() / torch.tensor(attention_maps.shape[-2:]).prod()
+        self.log("reg", regulariser)
+        loss += self.gamma * regulariser
+        for attended_image, (positive_regions_rows, negative_regions_rows), (positive_regions_cols, negative_regions_cols) in zip(attended_images, sampled_regions_rows, sampled_regions_cols):
+            if positive_regions_rows.shape[-1] < 2 or negative_regions_rows.shape[-1] < 2:
                 continue  # Not enough regions to contrast against each other
 
             positive_crops, negative_crops = (
-                torch.stack(list(itertools.chain(
-                    *[
-                        [
-                            attended_image[region.channel, region.row:region.row + region.size, region.col:region.col + region.size].unsqueeze(0)
-                            for region in regions
-                        ]
-                        for regions in region_type
+                torch.vstack(
+                    [
+                        torch.stack([
+                            attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
+                            for row, col in zip(channel_rows, channel_cols)
+                        ])
+                        for channel_index, (channel_rows, channel_cols) in enumerate(region_type)
                     ]
-                )))
-                for region_type in (positive_regions, negative_regions)
+                )
+                for region_type in (zip(positive_regions_rows, positive_regions_cols), zip(negative_regions_rows, negative_regions_cols))
             )
             positive_features = self.feature_network(positive_crops)
             negative_features = self.feature_network(negative_crops)
 
-            positive_lengths = [len(r) for r in positive_regions]
-            negative_lengths = [len(r) for r in negative_regions]
-            positive_class_to_index_range = [(sum(positive_lengths[:i]), sum(positive_lengths[:i+1])) for i in range(len(positive_regions))]
-            negative_class_to_index_range = [(sum(negative_lengths[:i]), sum(negative_lengths[:i+1])) for i in range(len(negative_regions))]
+            positive_lengths = [len(r) for r in positive_regions_rows]
+            negative_lengths = [len(r) for r in negative_regions_rows]
+            positive_class_to_index_range = [(sum(positive_lengths[:i]), sum(positive_lengths[:i+1])) for i in range(len(positive_regions_rows))]
+            negative_class_to_index_range = [(sum(negative_lengths[:i]), sum(negative_lengths[:i+1])) for i in range(len(negative_regions_rows))]
 
             for (positive_from_ci, positive_to_ci), (negative_from_ci, negative_to_ci) in zip(positive_class_to_index_range, negative_class_to_index_range):
                 # Select two positive representatives from this class
@@ -148,35 +131,45 @@ class Model(pl.LightningModule):
                     self.log("inter", inter_channel_contrastive_loss)
                     loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
-        to_plot = [
-            (
-                image.detach().cpu(),
-                attention_map.detach().cpu(),
-                attended_image.detach().cpu(),
-                positive_regions,
-                negative_regions,
-            )
-            for image, attention_map, attended_image, positive_regions, negative_regions
-            in zip(images, attention_maps, attended_images, sampled_positive_regions, sampled_negative_regions)
-        ]
+        if batch_idx % 10 == 0:
+            to_plot = [
+                (
+                    image,
+                    attention_map,
+                    attended_image.detach().cpu(),
+                    [list(zip(rows, cols)) for rows, cols in zip(regions_rows[0], regions_cols[0])],  # positive regions
+                    [list(zip(rows, cols)) for rows, cols in zip(regions_rows[1], regions_cols[1])],  # negative regions
+                    self.counter.kernel_size,
+                )
+                for image, attention_map, attended_image, regions_rows, regions_cols
+                in zip(
+                    images.detach().cpu(),
+                    attention_maps.detach().cpu(),
+                    attended_images.detach().cpu(),
+                    sampled_regions_rows.detach().cpu(),
+                    sampled_regions_cols.detach().cpu(),
+                )
+            ]
 
-        # to_histogram = [
-        #     (
-        #         image.detach().cpu(),
-        #         attended_image.detach().cpu(),
-        #         [
-        #             [region.attention for region in channel]
-        #             for channel in regions
-        #         ],
-        #     )
-        #     for image, attended_image, regions in zip(images, attended_images, regions)
-        # ]
+            plots_path = f"{self.logger.log_dir}/plots"
+            pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
 
-        plots_path = f"{self.logger.log_dir}/plots"
-        pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
-        # plot.plot_histograms(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")
-        plot_thread = threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"))
-        plot_thread.start()
+            if self.make_histograms:
+                to_histogram = [
+                    (
+                        image.detach().cpu(),
+                        attended_image.detach().cpu(),
+                        [
+                            [region.attention for region in channel]
+                            for channel in regions
+                        ],
+                    )
+                    for image, attended_image, regions in zip(images, attended_images, regions)
+                ]
+                plot.plot_histograms(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")
+
+            plot_thread = threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"))
+            plot_thread.start()
 
         self.log("loss", loss)
 
