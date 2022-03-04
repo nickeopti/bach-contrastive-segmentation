@@ -18,6 +18,7 @@ def parse_model_arguments(arg_parser: ArgumentParser) -> Dict[str, arguments.Cla
     available_samplers: List[selection.Sampler] = [
         selection.UniformSampler,
         selection.ProbabilisticSampler,
+        selection.ProbabilisticSentinelSampler,
         selection.TopKSampler,
     ]
     available_attention_networks: List[torch.nn.Module] = [
@@ -48,8 +49,8 @@ def create_trainer(args) -> pl.Trainer:
     return trainer
 
 
-def train(model, trainer, args):
-    dataset = data.SamplesDataset(args.dataset, crop_size=500)
+def train(model, trainer, dataset_info: arguments.ClassArguments, args):
+    dataset = dataset_info.class_type(**dataset_info.arguments)
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     try:
@@ -61,7 +62,7 @@ def train(model, trainer, args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="image.tiff")
+    dataset_info = arguments.add_options(parser, "dataset", (data.SamplesDataset, data.MoNuSegDataset, data.MultiSamplesDataset))
     parser.add_argument("--model_checkpoint", type=str)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -85,6 +86,6 @@ if __name__ == "__main__":
         if args.model_checkpoint is not None:
             model.load_from_checkpoint(args.model_checkpoint)
 
-        train(model, trainer, args)
+        train(model, trainer, dataset_info, args)
 
         successfully_started = os.path.exists(f"{trainer.logger.log_dir}/metrics.csv")

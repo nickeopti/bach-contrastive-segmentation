@@ -30,7 +30,7 @@ class Sampler:
 
 class UniformSampler(Sampler):
     def sample(self, values: torch.Tensor) -> torch.Tensor:
-        return torch.randint(low=0, high=values.shape[-1], size=(values.shape[0], 2, values.shape[1], self.n_positives))
+        return torch.randint(low=0, high=values.shape[-1], size=(values.shape[0], 2, values.shape[1], self.n))
 
 
 class ProbabilisticSampler(Sampler):
@@ -50,13 +50,44 @@ class ProbabilisticSampler(Sampler):
 
         indices_positives = torch.stack(
             [
-                torch.multinomial(image, self.n_positives, replacement=True)
+                torch.multinomial(image, self.n, replacement=True)
                 for image in probabilities_positives
             ]
         )
         indices_negatives = torch.stack(
             [
-                torch.multinomial(image, self.n_negatives, replacement=True)
+                torch.multinomial(image, self.n, replacement=True)
+                for image in probabilities_negatives
+            ]
+        )
+
+        return torch.stack((indices_positives, indices_negatives)).permute(1, 0, 2, 3)
+
+
+class ProbabilisticSentinelSampler(Sampler):
+    def __init__(self, n: int = 10, alpha: float = 1) -> None:
+        super().__init__(n)
+        self.alpha = alpha
+
+    def sample(self, values: torch.Tensor, m: float) -> torch.Tensor:
+        restricted_values = values / m
+        sentinels_added = torch.dstack((restricted_values, torch.ones(values.shape[:-1], device=values.device)))
+
+        exponentiated_values = sentinels_added ** self.alpha
+
+        sums = exponentiated_values.sum(dim=-1, keepdim=True)
+        probabilities_positives = exponentiated_values / sums
+        probabilities_negatives = (1 - probabilities_positives) / (probabilities_positives.shape[-1] - 1)
+
+        indices_positives = torch.stack(
+            [
+                torch.multinomial(image, self.n, replacement=True)
+                for image in probabilities_positives
+            ]
+        )
+        indices_negatives = torch.stack(
+            [
+                torch.multinomial(image, self.n, replacement=True)
                 for image in probabilities_negatives
             ]
         )
@@ -77,7 +108,7 @@ class TopKSampler(Sampler):
             [
                 torch.stack(
                     [
-                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n_positives,))]
+                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n,))]
                         for channel in image
                     ]
                 )
@@ -88,7 +119,7 @@ class TopKSampler(Sampler):
             [
                 torch.stack(
                     [
-                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n_negatives,))]
+                        channel[torch.randint(low=0, high=channel.numel(), size=(self.n,))]
                         for channel in image
                     ]
                 )

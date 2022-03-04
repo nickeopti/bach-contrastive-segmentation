@@ -76,16 +76,16 @@ class Model(pl.LightningModule):
         attended_images = images * attention_maps
 
         regions, count_shape = self.counter.count(attended_images)
-        sampled_regions = self.sampler.sample(regions)
+        sampled_regions = self.sampler.sample(regions, self.counter.kernel_size ** 2)
         sampled_regions_rows: torch.Tensor = torch.div(sampled_regions, count_shape[-1], rounding_mode='trunc') * self.counter.stride
         sampled_regions_cols: torch.Tensor = (sampled_regions % count_shape[-1]) * self.counter.stride
 
         loss = torch.zeros(1, device=batch.device)
-        regulariser = (0.5 - torch.abs(attention_maps - 0.5)).sum() / torch.tensor(attention_maps.shape[-2:]).prod()
-        self.log("reg", regulariser)
-        loss += self.gamma * regulariser
         for attended_image, (positive_regions_rows, negative_regions_rows), (positive_regions_cols, negative_regions_cols) in zip(attended_images, sampled_regions_rows, sampled_regions_cols):
-            if positive_regions_rows.shape[-1] < 2 or negative_regions_rows.shape[-1] < 2:
+            positive_lengths = [len([row for row in r if row < attended_image.shape[-2] - self.counter.kernel_size]) for r in positive_regions_rows]
+            negative_lengths = [len([row for row in r if row < attended_image.shape[-2] - self.counter.kernel_size]) for r in negative_regions_rows]
+
+            if any(l < 2 for l in positive_lengths) or any(l < 2 for l in negative_lengths):
                 continue  # Not enough regions to contrast against each other
 
             positive_crops, negative_crops = (
@@ -93,7 +93,7 @@ class Model(pl.LightningModule):
                     [
                         torch.stack([
                             attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
-                            for row, col in zip(channel_rows, channel_cols)
+                            for row, col in zip(channel_rows, channel_cols) if row < attended_image.shape[-2] - self.counter.kernel_size
                         ])
                         for channel_index, (channel_rows, channel_cols) in enumerate(region_type)
                     ]
@@ -103,8 +103,6 @@ class Model(pl.LightningModule):
             positive_features = self.feature_network(positive_crops)
             negative_features = self.feature_network(negative_crops)
 
-            positive_lengths = [len(r) for r in positive_regions_rows]
-            negative_lengths = [len(r) for r in negative_regions_rows]
             positive_class_to_index_range = [(sum(positive_lengths[:i]), sum(positive_lengths[:i+1])) for i in range(len(positive_regions_rows))]
             negative_class_to_index_range = [(sum(negative_lengths[:i]), sum(negative_lengths[:i+1])) for i in range(len(negative_regions_rows))]
 
@@ -131,7 +129,7 @@ class Model(pl.LightningModule):
                     self.log("inter", inter_channel_contrastive_loss)
                     loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 10 == 0 and self.current_epoch % 5 == 0:
             to_plot = [
                 (
                     image,
@@ -170,6 +168,13 @@ class Model(pl.LightningModule):
 
             plot_thread = threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"))
             plot_thread.start()
+
+        if loss == 0:
+            raise RuntimeError
+
+        regulariser = (0.5 - torch.abs(attention_maps - 0.5)).sum() / torch.tensor(attention_maps.shape[-2:]).prod()
+        self.log("reg", regulariser)
+        loss += self.gamma * regulariser
 
         self.log("loss", loss)
 

@@ -1,3 +1,7 @@
+import glob
+import os
+import random
+
 import matplotlib.pyplot as plt
 import torch
 from PIL import Image
@@ -8,7 +12,7 @@ from torchvision.transforms.transforms import Grayscale, RandomCrop
 
 
 class SamplesDataset(Dataset):
-    def __init__(self, image_path, crop_size=500, epsilon=0.05) -> None:
+    def __init__(self, image_path: str = "image.tiff", crop_size: int = 500, epsilon: float = 0.05) -> None:
         image = Image.open(image_path)
         image = ToTensor()(image)[:3]  # Discard the alpha band
         image = Grayscale(1)(image)
@@ -22,6 +26,44 @@ class SamplesDataset(Dataset):
     def __getitem__(self, _) -> Tensor:
         image = self.cropper(self.image)
         return (1 - self.epsilon) * image + self.epsilon
+
+
+class MultiSamplesDataset(Dataset):
+    def __init__(self, image_directory: str, crop_size: int = 500, epsilon: float = 0.05) -> None:
+        image_files = glob.glob(os.path.join(image_directory, '*.tif'))
+        images = map(Image.open, image_files)
+        images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+        self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
+    
+    def __len__(self):
+        return 250
+
+    def __getitem__(self, _) -> Tensor:
+        idx = random.randrange(0, len(self.images))
+        image = self.images[idx]
+        image = self.cropper(image)
+        return (1 - self.epsilon) * image + self.epsilon
+
+
+class MoNuSegDataset(Dataset):
+    def __init__(self, image_directory: str, crop_size: int = 250):
+        image_files = glob.glob(os.path.join(image_directory, '*.tif'))
+        images = map(Image.open, image_files)
+        images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+        self.cropper = RandomCrop(crop_size)
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        image = self.cropper(image)
+        return image
 
 
 def plotable(image):
