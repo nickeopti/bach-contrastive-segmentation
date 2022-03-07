@@ -49,13 +49,14 @@ class MultiSamplesDataset(Dataset):
 
 
 class MoNuSegDataset(Dataset):
-    def __init__(self, image_directory: str, crop_size: int = 250):
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05):
         image_files = glob.glob(os.path.join(image_directory, '*.tif'))
         images = map(Image.open, image_files)
         images = map(Grayscale(1), images)
         images = map(ToTensor(), images)
         self.images = list(images)
         self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
 
     def __len__(self):
         return len(self.images)
@@ -63,7 +64,7 @@ class MoNuSegDataset(Dataset):
     def __getitem__(self, idx):
         image = self.images[idx]
         image = self.cropper(image)
-        return image
+        return (1 - self.epsilon) * image + self.epsilon
 
 
 def plotable(image):
