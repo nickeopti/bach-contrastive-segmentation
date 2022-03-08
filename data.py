@@ -10,6 +10,10 @@ from torch.utils.data import Dataset
 from torchvision.transforms import ToTensor
 from torchvision.transforms.transforms import Grayscale, RandomCrop
 
+import skimage.draw
+import xml.etree.ElementTree as ET
+import numpy as np
+
 
 class SamplesDataset(Dataset):
     def __init__(self, image_path: str = "image.tiff", crop_size: int = 500, epsilon: float = 0.05) -> None:
@@ -65,6 +69,54 @@ class MoNuSegDataset(Dataset):
         image = self.images[idx]
         image = self.cropper(image)
         return (1 - self.epsilon) * image + self.epsilon
+
+
+class MoNuSegValidationDataset(Dataset):
+    def __init__(self, directory, epsilon: float = 0.05):
+        image_files = glob.glob(os.path.join(directory, '*tif'))
+        mask_files = [
+            f'{os.path.join(directory, os.path.splitext(os.path.basename(image_file))[0])}.xml'
+            for image_file in image_files
+        ]
+
+        images = map(Image.open, image_files)
+        images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+
+        masks = map(self.binary_mask_from_xml_file, mask_files)
+        masks = map(torch.Tensor, masks)
+        self.masks = list(masks)
+
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        mask = self.masks[idx]
+        return (1 - self.epsilon) * image + self.epsilon, mask.unsqueeze(0)
+
+    @classmethod
+    def binary_mask_from_xml_file(cls, xml_file_path, image_shape=(1000, 1000)):
+        tree = ET.parse(xml_file_path)
+        root = tree.getroot()
+
+        def vertex_element_to_tuple(vertex_element):
+            col = float(vertex_element.get('X'))
+            row = float(vertex_element.get('Y'))
+            return round(row), round(col)
+
+        mask = np.zeros(image_shape, dtype=np.uint8)
+        for region in root.iter('Region'):
+            vertices = map(vertex_element_to_tuple, region.iter('Vertex'))
+            rows, cols = np.array(list(zip(*vertices)))
+
+            rr, cc = skimage.draw.polygon(rows, cols, mask.shape)
+            mask[rr, cc] = 1
+
+        return mask
 
 
 def plotable(image):
