@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import numpy as np
+import torch
 
 
 COLOURS = ['green', 'red', 'darkorange', 'black', 'white']
@@ -81,6 +83,34 @@ def plot_histograms(data, path=None):
             axs[j][i].hist(channel_attentions, bins=20)
             axs[j][i].axis("off")
 
+    if path is None:
+        plt.show()
+    else:
+        fig.tight_layout()
+        fig.savefig(path, dpi=300)
+    plt.close()
+
+
+markings = np.array([(0, 0, 0, 0), (0, 255, 50, 255)])
+def plot_mask(images, masks, attention_maps, path=None):
+    assert len(images) == len(masks) == len(attention_maps)
+    n = len(images)
+    n_channels = len(attention_maps[1])
+    fig, axs = plt.subplots(2 + n_channels, n, figsize=(n, 2 + n_channels))
+    for i, (image, mask, attention_map) in enumerate(zip(images, masks, attention_maps)):
+        axs[0][i].imshow(plotable(image))
+        
+        if mask.dim() == 3:
+            mask = mask.squeeze(0)
+        mask = mask.type(torch.IntTensor)
+        axs[1][i].imshow(markings[mask])
+
+        for j, attention_map_channel in enumerate(attention_map, start=2):
+            axs[j][i].imshow(plotable(attention_map_channel))
+        
+        for j in range(2 + n_channels):
+            axs[j][i].axis("off")
+    
     if path is None:
         plt.show()
     else:
