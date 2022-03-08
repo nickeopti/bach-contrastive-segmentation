@@ -52,6 +52,7 @@ class Model(pl.LightningModule):
         feature_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
         gamma: float = 1,
+        learning_rate: float = 0.0002,
         make_histograms: bool = False,
     ):
         super().__init__()
@@ -68,6 +69,8 @@ class Model(pl.LightningModule):
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
         self.gamma = gamma
 
+        self.learning_rate = learning_rate
+
         self.make_histograms = make_histograms
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
@@ -75,7 +78,7 @@ class Model(pl.LightningModule):
         attention_maps = self.attention_network(images)
         attended_images = images * attention_maps
 
-        regions, count_shape = self.counter.count(attended_images)
+        regions, count_shape = self.counter.count(attention_maps)
         sampled_regions = self.sampler.sample(regions, self.counter.kernel_size ** 2)
         sampled_regions_rows: torch.Tensor = torch.div(sampled_regions, count_shape[-1], rounding_mode='trunc') * self.counter.stride
         sampled_regions_cols: torch.Tensor = (sampled_regions % count_shape[-1]) * self.counter.stride
@@ -179,7 +182,27 @@ class Model(pl.LightningModule):
         self.log("loss", loss)
 
         return loss
+    
+    def validation_step(self, batch, batch_idx):
+        images, masks = batch
+        attention_maps = self.attention_network(images)
+        predicted_masks = attention_maps > 0.5
+
+        masks = masks > 0.5  # turn it into a boolean tensor
+        tp = torch.logical_and(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
+        fp_fn = torch.logical_xor(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
+
+        dice_scores = 2 * tp / (tp + fp_fn)
+
+        for image_scores in dice_scores:
+            for i, channel_score in enumerate(image_scores, start=1):
+                self.log(f"val_c{i}", channel_score)
+        
+        if self.current_epoch % 5 == 0:
+            plots_path = f"{self.logger.log_dir}/plots"
+            plot_thread = threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png"))
+            plot_thread.start()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.0002, weight_decay=0.0001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=0.0001)
         return optimizer
