@@ -192,11 +192,16 @@ class Model(pl.LightningModule):
         tp = torch.logical_and(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
         fp_fn = torch.logical_xor(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
 
-        dice_scores = 2 * tp / (tp + fp_fn)
+        dice_scores = 2 * tp / (2 * tp + fp_fn)
+        jaccard_indexes = tp / (tp + fp_fn)
 
         for image_scores in dice_scores:
             for i, channel_score in enumerate(image_scores, start=1):
-                self.log(f"val_c{i}", channel_score)
+                self.log(f"mdc_c{i}", channel_score)
+
+        for image_scores in jaccard_indexes:
+            for i, channel_score in enumerate(image_scores, start=1):
+                self.log(f"mji_c{i}", channel_score)
         
         if self.current_epoch % 5 == 0:
             plots_path = f"{self.logger.log_dir}/plots"
