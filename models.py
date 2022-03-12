@@ -36,7 +36,7 @@ class Counter(nn.Module):
         self.f.weight = nn.Parameter(w, requires_grad=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.f(x)
+        return self.f(x) / self.kernel_size ** 2
     
     def count(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Size]:
         counts: torch.Tensor = self(x)
@@ -79,7 +79,7 @@ class Model(pl.LightningModule):
         attended_images = images * attention_maps
 
         regions, count_shape = self.counter.count(attention_maps)
-        sampled_regions = self.sampler.sample(regions, self.counter.kernel_size ** 2)
+        sampled_regions = self.sampler.sample(regions)
         sampled_regions_rows: torch.Tensor = torch.div(sampled_regions, count_shape[-1], rounding_mode='trunc') * self.counter.stride
         sampled_regions_cols: torch.Tensor = (sampled_regions % count_shape[-1]) * self.counter.stride
 

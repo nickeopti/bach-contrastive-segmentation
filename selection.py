@@ -69,9 +69,8 @@ class ProbabilisticSentinelSampler(Sampler):
         super().__init__(n)
         self.alpha = alpha
 
-    def sample(self, values: torch.Tensor, m: float) -> torch.Tensor:
-        restricted_values = values / m
-        sentinels_added = torch.dstack((restricted_values, torch.ones(values.shape[:-1], device=values.device)))
+    def sample(self, values: torch.Tensor) -> torch.Tensor:
+        sentinels_added = torch.dstack((values, torch.ones(values.shape[:-1], device=values.device)))
 
         exponentiated_values = sentinels_added ** self.alpha
 
