@@ -1,6 +1,6 @@
 import pathlib
 import threading
-from typing import List, Tuple
+from typing import List, Sequence, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -13,6 +13,15 @@ from selection import Region, Sampler
 Image = List
 Channel = List
 Regions = List[Region]
+
+POSITIVE = 0
+NEGATIVE = 1
+
+
+def sample(population: Union[Sequence, torch.Tensor], k: int, replace=False):
+    n = len(population)
+    indices = np.random.choice(n, k, replace=replace)
+    return [population[i] for i in indices]
 
 
 class Counter(nn.Module):
@@ -64,8 +73,7 @@ class Model(pl.LightningModule):
         self.attention_network = attention_network
         self.feature_network = feature_network
 
-        self.cos_single = nn.CosineSimilarity(dim=0)
-        self.cos_multiple = nn.CosineSimilarity(dim=1)
+        self.cosine_similarity = nn.CosineSimilarity(dim=1)
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
         self.gamma = gamma
 
@@ -78,99 +86,112 @@ class Model(pl.LightningModule):
         attention_maps = self.attention_network(images)
         attended_images = images * attention_maps
 
+        n_images = images.shape[0]
+        n_classes = attention_maps.shape[1]
+
         regions, count_shape = self.counter.count(attention_maps)
         sampled_regions = self.sampler.sample(regions)
-        sampled_regions_rows: torch.Tensor = torch.div(sampled_regions, count_shape[-1], rounding_mode='trunc') * self.counter.stride
-        sampled_regions_cols: torch.Tensor = (sampled_regions % count_shape[-1]) * self.counter.stride
+        # sampled_regions is of shape: image, parity, channel, region
 
+        def unpack_index(idx):
+            idx = idx.item()
+            row = idx // count_shape[-1]
+            col = idx % count_shape[-1]
+            return row * self.counter.stride, col * self.counter.stride
+
+        # extract regions
+        x = [([], []) for _ in range(n_classes)]
+        for attended_image, (positive_regions, negative_regions) in zip(attended_images, sampled_regions):
+            for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
+                for channel_index, channel_regions in enumerate(parity_regions):
+                    x[channel_index][parity].extend((
+                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
+                        for row, col in map(unpack_index, channel_regions)
+                        if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                    ))
+
+        # vectorise within class, parity
+        x = [tuple(map(torch.stack, c)) for c in x]
+
+        # featurise regions; shape class, parity, prediction
+        y = [tuple(map(self.feature_network, c)) for c in x]
+
+        # contrast regions:
         loss = torch.zeros(1, device=batch.device)
-        for attended_image, (positive_regions_rows, negative_regions_rows), (positive_regions_cols, negative_regions_cols) in zip(attended_images, sampled_regions_rows, sampled_regions_cols):
-            positive_lengths = [len([row for row in r if row < attended_image.shape[-2] - self.counter.kernel_size]) for r in positive_regions_rows]
-            negative_lengths = [len([row for row in r if row < attended_image.shape[-2] - self.counter.kernel_size]) for r in negative_regions_rows]
+        for c in range(n_classes):
+            # select positive representatives from this class
+            positives = sample(y[c][POSITIVE], n := 10)
 
-            if any(l < 2 for l in positive_lengths) or any(l < 2 for l in negative_lengths):
-                continue  # Not enough regions to contrast against each other
+            # Intra-channel contrastive loss:
+            intra_channel_pos_pos_similarity = [
+                self.cosine_similarity(positive, y[c][POSITIVE])
+                for positive in positives
+            ]
+            intra_channel_pos_neg_similarity = [
+                self.cosine_similarity(positive, y[c][NEGATIVE])
+                for positive in positives
+            ]
+            intra_channel_contrastive_loss = sum(
+                -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum()
+                for pp, pn in zip(intra_channel_pos_pos_similarity, intra_channel_pos_neg_similarity)
+            ) / n**2 / n_images
+            self.log("intra", intra_channel_contrastive_loss)
+            loss += intra_channel_contrastive_loss
 
-            positive_crops, negative_crops = (
-                torch.vstack(
-                    [
-                        torch.stack([
-                            attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
-                            for row, col in zip(channel_rows, channel_cols) if row < attended_image.shape[-2] - self.counter.kernel_size
-                        ])
-                        for channel_index, (channel_rows, channel_cols) in enumerate(region_type)
-                    ]
-                )
-                for region_type in (zip(positive_regions_rows, positive_regions_cols), zip(negative_regions_rows, negative_regions_cols))
-            )
-            positive_features = self.feature_network(positive_crops)
-            negative_features = self.feature_network(negative_crops)
+            # Inter-channel contrastive loss:
+            if n_classes > 1:  # Only makes sense if more than one channel
+                # All the positive samples from all the other classes
+                all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
-            positive_class_to_index_range = [(sum(positive_lengths[:i]), sum(positive_lengths[:i+1])) for i in range(len(positive_regions_rows))]
-            negative_class_to_index_range = [(sum(negative_lengths[:i]), sum(negative_lengths[:i+1])) for i in range(len(negative_regions_rows))]
+                inter_channel_pos_pos_similarity = [
+                    self.cosine_similarity(positive, all_other_classes_positives)
+                    for positive in positives
+                ]
+                inter_channel_contrastive_loss = sum(
+                    -torch.log(torch.exp(intra_pp) / torch.exp(inter_pp).sum()).sum()
+                    for intra_pp, inter_pp in zip(intra_channel_pos_pos_similarity, inter_channel_pos_pos_similarity)
+                ) / n**2 / n_images
+                self.log("inter", inter_channel_contrastive_loss)
+                loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
-            for (positive_from_ci, positive_to_ci), (negative_from_ci, negative_to_ci) in zip(positive_class_to_index_range, negative_class_to_index_range):
-                # Select two positive representatives from this class
-                i1, i2 = np.random.choice(positive_to_ci - positive_from_ci, 2, replace=False)
-                pos_1 = positive_features[positive_from_ci + i1]
-                pos_2 = positive_features[positive_from_ci + i2]
-
-                # Intra-channel contrastive loss:
-                intra_channel_pos_pos_similarity = self.cos_single(pos_1, pos_2)
-                intra_channel_pos_neg_similarity = self.cos_multiple(pos_1, negative_features[negative_from_ci:negative_to_ci])
-                intra_channel_contrastive_loss = -torch.log(torch.exp(intra_channel_pos_pos_similarity) / torch.exp(intra_channel_pos_neg_similarity).sum())
-                self.log("intra", intra_channel_contrastive_loss)
-                loss += intra_channel_contrastive_loss
-
-                # Inter-channel contrastive loss:
-                if len(positive_class_to_index_range) > 1:  # Only makes sense if more than one channel
-                    # All the positive samples from all the other classes
-                    all_other_classes_positives = torch.vstack((positive_features[:positive_from_ci], positive_features[positive_to_ci:]))
-
-                    inter_channel_pos_pos_similarity = self.cos_multiple(pos_1, all_other_classes_positives)
-                    inter_channel_contrastive_loss = -torch.log(torch.exp(intra_channel_pos_pos_similarity) / torch.exp(inter_channel_pos_pos_similarity).sum())
-                    self.log("inter", inter_channel_contrastive_loss)
-                    loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
-
+        # Plotting
         if batch_idx % 10 == 0 and self.current_epoch % 5 == 0:
             to_plot = [
                 (
                     image,
                     attention_map,
                     attended_image.detach().cpu(),
-                    [list(zip(rows, cols)) for rows, cols in zip(regions_rows[0], regions_cols[0])],  # positive regions
-                    [list(zip(rows, cols)) for rows, cols in zip(regions_rows[1], regions_cols[1])],  # negative regions
+                    [list(map(unpack_index, channel_regions)) for channel_regions in positive_regions],
+                    [list(map(unpack_index, channel_regions)) for channel_regions in negative_regions],
                     self.counter.kernel_size,
                 )
-                for image, attention_map, attended_image, regions_rows, regions_cols
+                for image, attention_map, attended_image, (positive_regions, negative_regions)
                 in zip(
                     images.detach().cpu(),
                     attention_maps.detach().cpu(),
                     attended_images.detach().cpu(),
-                    sampled_regions_rows.detach().cpu(),
-                    sampled_regions_cols.detach().cpu(),
+                    sampled_regions.detach().cpu(),
                 )
             ]
 
             plots_path = f"{self.logger.log_dir}/plots"
             pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
+            threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png")).start()
 
             if self.make_histograms:
                 to_histogram = [
                     (
                         image.detach().cpu(),
-                        attended_image.detach().cpu(),
+                        attention_map.detach().cpu(),
                         [
                             [region.attention for region in channel]
                             for channel in regions
                         ],
                     )
-                    for image, attended_image, regions in zip(images, attended_images, regions)
+                    for image, attention_map, regions in zip(images, attention_maps, regions)
                 ]
                 plot.plot_histograms(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")
-
-            plot_thread = threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png"))
-            plot_thread.start()
+                threading.Thread(target=plot.plot_histograms, args=(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")).start()
 
         if loss == 0:
             raise RuntimeError
@@ -205,8 +226,8 @@ class Model(pl.LightningModule):
         
         if self.current_epoch % 5 == 0:
             plots_path = f"{self.logger.log_dir}/plots"
-            plot_thread = threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png"))
-            plot_thread.start()
+            pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
+            threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png")).start()
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=0.0001)
