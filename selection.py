@@ -23,6 +23,9 @@ class Sampler:
     def __init__(self, n: int = 10) -> None:
         self.n = n
 
+    def preprocess(self, values: torch.Tensor) -> torch.Tensor:
+        return values  # Defaults to noop
+
     @abstractmethod
     def sample(self, values: torch.Tensor) -> torch.Tensor:
         pass
@@ -127,3 +130,32 @@ class TopKSampler(Sampler):
         )
 
         return torch.stack((indices_positives, indices_negatives)).permute(1, 0, 2, 3)
+
+
+class EntropySampler(Sampler):
+    def preprocess(self, values: torch.Tensor) -> torch.Tensor:
+        return -(values * torch.log2(values) + (1 - values) * torch.log2(1 - values))
+
+    def sample(self, entropies: torch.Tensor, attentions: torch.Tensor) -> torch.Tensor:
+        sampled = torch.stack(
+            [
+                torch.multinomial(1 - image, self.n, replacement=True)
+                for image in entropies
+            ]
+        )
+        parity = torch.bernoulli(attentions)
+        positives = [
+            [
+                [i for i in channel if parity[image_idx, channel_idx, i] == 1]
+                for channel_idx, channel in enumerate(image)
+            ]
+            for image_idx, image in enumerate(sampled)
+        ]
+        negatives = [
+            [
+                [i for i in channel if parity[image_idx, channel_idx, i] == 0]
+                for channel_idx, channel in enumerate(image)
+            ]
+            for image_idx, image in enumerate(sampled)
+        ]
+        return list(zip(positives, negatives))

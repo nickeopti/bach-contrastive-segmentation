@@ -89,7 +89,8 @@ class Model(pl.LightningModule):
         n_images = images.shape[0]
         n_classes = attention_maps.shape[1]
 
-        regions, count_shape = self.counter.count(attention_maps)
+        regions, count_shape = self.counter.count(self.sampler.preprocess(attention_maps))
+        # sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
         sampled_regions = self.sampler.sample(regions)
         # sampled_regions is of shape: image, parity, channel, region
 
@@ -170,7 +171,7 @@ class Model(pl.LightningModule):
                     images.detach().cpu(),
                     attention_maps.detach().cpu(),
                     attended_images.detach().cpu(),
-                    sampled_regions.detach().cpu(),
+                    sampled_regions,
                 )
             ]
 
