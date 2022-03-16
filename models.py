@@ -118,7 +118,7 @@ class Model(pl.LightningModule):
         # y = [tuple(map(self.feature_network, c)) for c in x]
 
         def cross_entropy(x1, x2):
-            ce = -(x2 * torch.log2(x1) + (1 - x2) * torch.log2(1 - x1))
+            ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
             return -ce.mean(dim=(-1, -2))
             # kl = x1 * torch.log2(x1 / x2)
             # return -kl.mean(dim=(-1, -2))
