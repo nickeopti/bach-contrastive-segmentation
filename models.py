@@ -90,8 +90,8 @@ class Model(pl.LightningModule):
         n_classes = attention_maps.shape[1]
 
         regions, count_shape = self.counter.count(self.sampler.preprocess(attention_maps))
-        # sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
-        sampled_regions = self.sampler.sample(regions)
+        sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
+        # sampled_regions = self.sampler.sample(regions)
         # sampled_regions is of shape: image, parity, channel, region
 
         def unpack_index(idx):
@@ -106,30 +106,36 @@ class Model(pl.LightningModule):
             for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
                 for channel_index, channel_regions in enumerate(parity_regions):
                     x[channel_index][parity].extend((
-                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
+                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
                         for row, col in map(unpack_index, channel_regions)
                         if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
                     ))
 
         # vectorise within class, parity
-        x = [tuple(map(torch.stack, c)) for c in x]
+        y = [tuple(map(torch.stack, c)) for c in x]
 
         # featurise regions; shape class, parity, prediction
-        y = [tuple(map(self.feature_network, c)) for c in x]
+        # y = [tuple(map(self.feature_network, c)) for c in x]
+
+        def cross_entropy(x1, x2):
+            ce = -(x2 * torch.log2(x1) + (1 - x2) * torch.log2(1 - x1))
+            return -ce.mean(dim=(-1, -2))
+            # kl = x1 * torch.log2(x1 / x2)
+            # return -kl.mean(dim=(-1, -2))
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
         for c in range(n_classes):
             # select positive representatives from this class
-            positives = sample(y[c][POSITIVE], n := 10)
+            positives = sample(y[c][POSITIVE], n := 10, replace=True)
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                self.cosine_similarity(positive, y[c][POSITIVE])
+                cross_entropy(positive, y[c][POSITIVE])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                self.cosine_similarity(positive, y[c][NEGATIVE])
+                cross_entropy(positive, y[c][NEGATIVE])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
@@ -145,7 +151,7 @@ class Model(pl.LightningModule):
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    self.cosine_similarity(positive, all_other_classes_positives)
+                    cross_entropy(positive, all_other_classes_positives)
                     for positive in positives
                 ]
                 inter_channel_contrastive_loss = sum(

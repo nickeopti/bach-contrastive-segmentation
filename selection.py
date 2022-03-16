@@ -134,7 +134,10 @@ class TopKSampler(Sampler):
 
 class EntropySampler(Sampler):
     def preprocess(self, values: torch.Tensor) -> torch.Tensor:
-        return -(values * torch.log2(values) + (1 - values) * torch.log2(1 - values))
+        def clamp(x):
+            return torch.maximum(x, torch.tensor(-100))
+        ce = -(values * clamp(torch.log2(values)) + (1 - values) * clamp(torch.log2(1 - values)))
+        return torch.minimum(ce, torch.tensor(0.9999))
 
     def sample(self, entropies: torch.Tensor, attentions: torch.Tensor) -> torch.Tensor:
         sampled = torch.stack(
