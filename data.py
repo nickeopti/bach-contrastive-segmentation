@@ -92,7 +92,7 @@ class MoNuSegValidationDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
-    
+
     def __getitem__(self, idx):
         image = self.images[idx]
         mask = self.masks[idx]
@@ -117,6 +117,52 @@ class MoNuSegValidationDataset(Dataset):
             mask[rr, cc] = 1
 
         return mask
+
+
+class GlaSDataset(Dataset):
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05):
+        image_files = [f for f in glob.glob(os.path.join(image_directory, '*.bmp')) if 'anno' not in f]
+        images = map(Image.open, image_files)
+        images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+        self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        image = self.cropper(image)
+        return (1 - self.epsilon) * image + self.epsilon
+
+
+class GlaSValidationDataset(Dataset):
+    def __init__(self, directory, epsilon: float = 0.05):
+        files = glob.glob(os.path.join(directory, '*.bmp'))
+        image_files = [f for f in files if 'anno' not in f]
+        mask_files = [f for f in files if 'anno' in f]
+
+        images = map(Image.open, image_files)
+        images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+
+        masks = map(Image.open, mask_files)
+        masks = map(Grayscale(1), images)
+        masks = map(torch.Tensor, masks)
+        self.masks = [(m > 0).type(torch.float) for m in masks]
+
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        mask = self.masks[idx]
+        return (1 - self.epsilon) * image + self.epsilon, mask
 
 
 def plotable(image):

@@ -90,8 +90,10 @@ class Model(pl.LightningModule):
         n_classes = attention_maps.shape[1]
 
         regions, count_shape = self.counter.count(self.sampler.preprocess(attention_maps))
-        sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
-        # sampled_regions = self.sampler.sample(regions)
+        try:
+            sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
+        except TypeError:
+            sampled_regions = self.sampler.sample(regions)
         # sampled_regions is of shape: image, parity, channel, region
 
         def unpack_index(idx):

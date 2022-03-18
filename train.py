@@ -67,7 +67,7 @@ def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, ar
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    dataset_info = arguments.add_options(parser, "dataset", (data.SamplesDataset, data.MoNuSegDataset, data.MultiSamplesDataset))
+    dataset_info = arguments.add_options(parser, "dataset", (data.SamplesDataset, data.MoNuSegDataset, data.MultiSamplesDataset, data.GlaSDataset, data.GlaSValidationDataset))
     dataset_validation = parser.add_argument("--validate_data", type=str, default=None)
     parser.add_argument("--model_checkpoint", type=str)
     parser.add_argument("--batch_size", type=int, default=16)
