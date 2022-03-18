@@ -92,11 +92,12 @@ def plot_histograms(data, path=None):
 
 
 markings = np.array([(0, 0, 0, 0), (0, 255, 50, 255)])
+contours = np.array([(0, 0, 0, 0), (0, 0, 255, 255), (0, 255, 0, 255), (255, 0, 0, 255)])
 def plot_mask(images, masks, attention_maps, path=None):
     assert len(images) == len(masks) == len(attention_maps)
     n = len(images)
     n_channels = len(attention_maps[1])
-    fig, axs = plt.subplots(2 + n_channels, n, figsize=(n, 2 + n_channels))
+    fig, axs = plt.subplots(2 + 2 * n_channels, n, figsize=(n, 2 + 2 * n_channels))
     for i, (image, mask, attention_map) in enumerate(zip(images, masks, attention_maps)):
         axs[0][i].imshow(plotable(image))
         
@@ -105,10 +106,14 @@ def plot_mask(images, masks, attention_maps, path=None):
         mask = mask.type(torch.IntTensor)
         axs[1][i].imshow(markings[mask])
 
-        for j, attention_map_channel in enumerate(attention_map, start=2):
-            axs[j][i].imshow(plotable(attention_map_channel))
+        for j, attention_map_channel in enumerate(attention_map, start=0):
+            axs[2*j+2][i].imshow(plotable(attention_map_channel))
+            diffs = (attention_map_channel > 0.5).squeeze(0).type(torch.IntTensor)
+            diffs[torch.logical_and(diffs, 1 - mask)] = 3
+            diffs[torch.logical_and(1 - diffs, mask)] = 2
+            axs[2*j+3][i].imshow(contours[diffs])
         
-        for j in range(2 + n_channels):
+        for j in range(2 + 2 * n_channels):
             axs[j][i].axis("off")
     
     if path is None:
