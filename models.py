@@ -104,46 +104,67 @@ class Model(pl.LightningModule):
 
         # extract regions
         x = [([], []) for _ in range(n_classes)]
-        for attended_image, (positive_regions, negative_regions) in zip(attended_images, sampled_regions):
+        a = [([], []) for _ in range(n_classes)]
+        for image, attention_map, (positive_regions, negative_regions) in zip(images, attention_maps, sampled_regions):
             for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
                 for channel_index, channel_regions in enumerate(parity_regions):
                     x[channel_index][parity].extend((
-                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                        image[0, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
                         for row, col in map(unpack_index, channel_regions)
-                        if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                        if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                    ))
+                    a[channel_index][parity].extend((
+                        attention_map[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                        for row, col in map(unpack_index, channel_regions)
+                        if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
                     ))
 
         # vectorise within class, parity
         y = [tuple(map(torch.stack, c)) for c in x]
+        b = [tuple(map(torch.stack, c)) for c in a]
 
         # featurise regions; shape class, parity, prediction
         # y = [tuple(map(self.feature_network, c)) for c in x]
 
-        def cross_entropy(x1, x2):
-            ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
-            return -ce.mean(dim=(-1, -2))
+        def clamp(x):
+            return torch.maximum(x, torch.tensor(-100))
+        def similarity(x1, x2):
+            # ce = -(x1 * clamp(torch.log2(x2)) + (1 - x1) * clamp(torch.log2(1 - x2)))
+            # return -ce.mean(dim=(-1, -2))
             # kl = x1 * torch.log2(x1 / x2)
             # return -kl.mean(dim=(-1, -2))
+            mse = (x1 - x2) ** 2
+            return 1 - 2*mse.mean(dim=(-1, -2))
+
+        def pos(x):
+            v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
+            return torch.maximum(torch.tensor(0), v)
+        def neg(x):
+            v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
+            return torch.maximum(torch.tensor(0), -v)
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
         for c in range(n_classes):
             # select positive representatives from this class
-            positives = sample(y[c][POSITIVE], n := 10, replace=True)
+            # positives = sample(y[c][POSITIVE], n := 10, replace=True)
+            n = 10
+            positives = np.random.choice(len(y[c][POSITIVE]), n, replace=True)
+            # positives = [population[i] for i in indices]
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                cross_entropy(positive, y[c][POSITIVE])
+                similarity(y[c][POSITIVE][positive], y[c][POSITIVE]) * pos(b[c][POSITIVE][positive]) * pos(b[c][POSITIVE])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                cross_entropy(positive, y[c][NEGATIVE])
+                similarity(y[c][POSITIVE][positive], y[c][NEGATIVE]) * pos(b[c][POSITIVE][positive]) * neg(b[c][NEGATIVE])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
-                -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum()
+                -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum()  # the sum in  `exp(pn).sum()` shall probably be replaced by a mean? 
                 for pp, pn in zip(intra_channel_pos_pos_similarity, intra_channel_pos_neg_similarity)
-            ) / n**2 / n_images
+            ) / n_images
             self.log("intra", intra_channel_contrastive_loss)
             loss += intra_channel_contrastive_loss
 
@@ -153,7 +174,7 @@ class Model(pl.LightningModule):
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    cross_entropy(positive, all_other_classes_positives)
+                    similarity(positive, all_other_classes_positives)
                     for positive in positives
                 ]
                 inter_channel_contrastive_loss = sum(
@@ -164,7 +185,7 @@ class Model(pl.LightningModule):
                 loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
         # Plotting
-        if batch_idx % 10 == 0 and self.current_epoch % 5 == 0:
+        if batch_idx % 10 == 0 and self.current_epoch % 1 == 0:
             to_plot = [
                 (
                     image,
@@ -216,7 +237,13 @@ class Model(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         images, masks = batch
         attention_maps = self.attention_network(images)
-        predicted_masks = attention_maps > 0.5
+        attention_maps = torch.stack(
+            [
+                torch.vstack([image, 1-image])
+                for image in attention_maps
+            ]
+        )
+        predicted_masks = attention_maps > attention_maps.mean()
 
         masks = masks > 0.5  # turn it into a boolean tensor
         tp = torch.logical_and(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
@@ -239,5 +266,5 @@ class Model(pl.LightningModule):
             threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png")).start()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=0.0001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=0.0000)
         return optimizer
