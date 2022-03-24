@@ -37,7 +37,7 @@ def plot_selected_crops(data, path=None):
                         size,
                         size,
                         linewidth=0.5,
-                        edgecolor='green',
+                        edgecolor='white',
                         facecolor="none",
                     )
                 )
