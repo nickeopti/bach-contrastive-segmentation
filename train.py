@@ -45,7 +45,11 @@ def create_trainer(args) -> pl.Trainer:
         args,
         logger=logger,
         log_every_n_steps=1,
-        callbacks=[ModelCheckpoint(every_n_epochs=1)],
+        callbacks=[ModelCheckpoint(
+            monitor="best_val_mdc",
+            save_top_k=5,
+            mode="max",
+        )],
     )
     return trainer
 

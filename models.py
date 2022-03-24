@@ -243,6 +243,12 @@ class Model(pl.LightningModule):
             pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
             threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png")).start()
 
+        return dice_scores
+
+    def validation_epoch_end(self, validation_step_outputs):
+        scores = torch.vstack(validation_step_outputs)
+        self.log("best_val_mdc", max(scores.mean(0)))
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=0.0001)
         return optimizer
