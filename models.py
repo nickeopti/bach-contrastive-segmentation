@@ -134,12 +134,12 @@ class Model(pl.LightningModule):
             # kl = x1 * torch.log2(x1 / x2)
             # return -kl.mean(dim=(-1, -2))
             mse = (x1 - x2) ** 2
-            return 1 - 2*mse.mean(dim=(-1, -2))
+            return 0.2 - 2*mse.mean(dim=(-1, -2))
 
-        def pos(x):
+        def neg(x):
             v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
             return torch.maximum(torch.tensor(0), v)
-        def neg(x):
+        def pos(x):
             v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
             return torch.maximum(torch.tensor(0), -v)
 
@@ -148,7 +148,7 @@ class Model(pl.LightningModule):
         for c in range(n_classes):
             # select positive representatives from this class
             # positives = sample(y[c][POSITIVE], n := 10, replace=True)
-            n = 10
+            n = 150
             positives = np.random.choice(len(y[c][POSITIVE]), n, replace=True)
             # positives = [population[i] for i in indices]
 
