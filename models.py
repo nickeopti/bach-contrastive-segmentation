@@ -61,6 +61,7 @@ class Model(pl.LightningModule):
         feature_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
         gamma: float = 1,
+        loss: str = "ce",
         learning_rate: float = 0.0002,
         make_histograms: bool = False,
     ):
@@ -76,6 +77,20 @@ class Model(pl.LightningModule):
         self.cosine_similarity = nn.CosineSimilarity(dim=1)
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
         self.gamma = gamma
+
+        self.featurise = loss == "feature"
+        if loss == "ce":
+            def l(x1, x2):
+                ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
+                return -ce.mean(dim=(-1, -2))
+            self.loss_function = l
+        elif loss == "mse":
+            def l(x1, x2):
+                mse = (x1 - x2) ** 2
+                return -mse.mean(dim=(-1, -2))
+            self.loss_function = l
+        elif loss == "feature":
+            self.loss_function = nn.CosineSimilarity(dim=1)
 
         self.learning_rate = learning_rate
 
@@ -116,14 +131,9 @@ class Model(pl.LightningModule):
         # vectorise within class, parity
         y = [tuple(map(torch.stack, c)) for c in x]
 
-        # featurise regions; shape class, parity, prediction
-        # y = [tuple(map(self.feature_network, c)) for c in x]
-
-        def cross_entropy(x1, x2):
-            ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
-            return -ce.mean(dim=(-1, -2))
-            # kl = x1 * torch.log2(x1 / x2)
-            # return -kl.mean(dim=(-1, -2))
+        if self.featurise:
+            # featurise regions; shape class, parity, prediction
+            y = [tuple(map(self.feature_network, c)) for c in y]
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
@@ -133,11 +143,11 @@ class Model(pl.LightningModule):
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                cross_entropy(positive, y[c][POSITIVE])
+                self.loss_function(positive, y[c][POSITIVE])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                cross_entropy(positive, y[c][NEGATIVE])
+                self.loss_function(positive, y[c][NEGATIVE])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
@@ -153,7 +163,7 @@ class Model(pl.LightningModule):
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    cross_entropy(positive, all_other_classes_positives)
+                    self.loss_function(positive, all_other_classes_positives)
                     for positive in positives
                 ]
                 inter_channel_contrastive_loss = sum(
@@ -223,17 +233,12 @@ class Model(pl.LightningModule):
         fp_fn = torch.logical_xor(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
 
         dice_scores = 2 * tp / (2 * tp + fp_fn)
-        jaccard_indexes = tp / (tp + fp_fn)
 
         for image_scores in dice_scores:
             for i, channel_score in enumerate(image_scores, start=1):
                 self.log(f"mdc_c{i}", channel_score)
 
-        for image_scores in jaccard_indexes:
-            for i, channel_score in enumerate(image_scores, start=1):
-                self.log(f"mji_c{i}", channel_score)
-        
-        if self.current_epoch % 5 == 0:
+        if self.current_epoch % 5 == 0 and batch_idx == 0:
             plots_path = f"{self.logger.log_dir}/plots"
             pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
             threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png")).start()

@@ -56,7 +56,7 @@ def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, ar
 
     if args.validate_data:
         validation_dataset = data.MoNuSegValidationDataset(args.validate_data)
-        validation_data_loader = DataLoader(validation_dataset, batch_size=len(validation_dataset), num_workers=args.num_workers)
+        validation_data_loader = DataLoader(validation_dataset, batch_size=10, num_workers=args.num_workers)
 
     try:
         trainer.fit(model, train_data_loader, val_dataloaders=validation_data_loader if args.validate_data else None)
@@ -73,6 +73,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--gamma", type=float, default=1)
+    parser.add_argument("--loss", type=str, default="ce")
     parser.add_argument("--learning_rate", type=float, default=0.0002)
 
     model_parameters = parse_model_arguments(parser)
