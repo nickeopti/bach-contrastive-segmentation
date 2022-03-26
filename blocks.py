@@ -64,7 +64,7 @@ class TypeNetwork(nn.Module):
             Conv2dBlock(8, 8, kernel_size=3, stride=2, dilation=2, bias=False),
             Conv2dBlock(8, 1, kernel_size=3, stride=2, dilation=2, bias=False),
             nn.Flatten(),
-            nn.Linear(81, 32),
+            nn.Linear(16, 32),
         )
 
     def forward(self, x):

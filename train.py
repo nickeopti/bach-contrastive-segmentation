@@ -84,7 +84,7 @@ if __name__ == "__main__":
     successfully_started = False
     while not successfully_started:
         model = models.Model(
-            counter=models.Counter(args.out_channels, 50, 20),
+            counter=models.Counter(args.out_channels, 30, 10),
             inter_channel_loss_scaling_factor=1,
             gamma=args.gamma,
             **{parameter: ca.class_type(**ca.arguments) for parameter, ca in model_parameters.items()}
