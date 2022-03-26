@@ -137,12 +137,12 @@ class EntropySampler(Sampler):
         def clamp(x):
             return torch.maximum(x, torch.tensor(-100))
         ce = -(values * clamp(torch.log2(values)) + (1 - values) * clamp(torch.log2(1 - values)))
-        return torch.minimum(ce, torch.tensor(0.9999))
+        return ce
 
     def sample(self, entropies: torch.Tensor, attentions: torch.Tensor) -> torch.Tensor:
         sampled = torch.stack(
             [
-                torch.multinomial(1 - image, self.n, replacement=True)
+                torch.multinomial(torch.maximum(1 - image, torch.tensor(0.001)), self.n, replacement=True)
                 for image in entropies
             ]
         )

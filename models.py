@@ -128,6 +128,9 @@ class Model(pl.LightningModule):
                         if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
                     ))
 
+        if any(any(len(p) == 0 for p in c) for c in x):
+            return None
+
         # vectorise within class, parity
         y = [tuple(map(torch.stack, c)) for c in x]
 
@@ -213,7 +216,7 @@ class Model(pl.LightningModule):
                 threading.Thread(target=plot.plot_histograms, args=(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")).start()
 
         if loss == 0:
-            raise RuntimeError
+            return None
 
         regulariser = (0.5 - torch.abs(attention_maps - 0.5)).sum() / torch.tensor(attention_maps.shape[-2:]).prod()
         self.log("reg", regulariser)
