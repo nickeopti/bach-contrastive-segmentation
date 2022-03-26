@@ -89,11 +89,8 @@ class Model(pl.LightningModule):
         n_images = images.shape[0]
         n_classes = attention_maps.shape[1]
 
-        regions, count_shape = self.counter.count(self.sampler.preprocess(attention_maps))
-        try:
-            sampled_regions = self.sampler.sample(regions, self.counter.count(attention_maps)[0])
-        except TypeError:
-            sampled_regions = self.sampler.sample(regions)
+        regions, count_shape = self.counter.count(attention_maps)
+        sampled_regions = torch.randint(low=0, high=regions.shape[-1], size=(regions.shape[0], regions.shape[1], 20))
         # sampled_regions is of shape: image, parity, channel, region
 
         def unpack_index(idx):
@@ -103,28 +100,27 @@ class Model(pl.LightningModule):
             return row * self.counter.stride, col * self.counter.stride
 
         # extract regions
-        x = [([], []) for _ in range(n_classes)]
-        a = [([], []) for _ in range(n_classes)]
-        for image, attention_map, (positive_regions, negative_regions) in zip(images, attention_maps, sampled_regions):
-            for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
-                for channel_index, channel_regions in enumerate(parity_regions):
-                    x[channel_index][parity].extend((
-                        image[0, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
-                        for row, col in map(unpack_index, channel_regions)
-                        if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
-                    ))
-                    a[channel_index][parity].extend((
-                        attention_map[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
-                        for row, col in map(unpack_index, channel_regions)
-                        if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
-                    ))
+        x = [[] for _ in range(n_classes)]
+        a = [[] for _ in range(n_classes)]
+        for image, attention_map, regions in zip(images, attention_maps, sampled_regions):
+            for channel_index, channel_regions in enumerate(regions):
+                x[channel_index].extend((
+                    image[0, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size].unsqueeze(0)
+                    for row, col in map(unpack_index, channel_regions)
+                    if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                ))
+                a[channel_index].extend((
+                    attention_map[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                    for row, col in map(unpack_index, channel_regions)
+                    if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                ))
 
         # vectorise within class, parity
-        y = [tuple(map(torch.stack, c)) for c in x]
-        b = [tuple(map(torch.stack, c)) for c in a]
+        y = [torch.stack(c) for c in x]
+        b = [torch.stack(c) for c in a]
 
         # featurise regions; shape class, parity, prediction
-        # y = [tuple(map(self.feature_network, c)) for c in x]
+        y = [self.feature_network(c) for c in y]
 
         def clamp(x):
             return torch.maximum(x, torch.tensor(-100))
@@ -134,14 +130,16 @@ class Model(pl.LightningModule):
             # kl = x1 * torch.log2(x1 / x2)
             # return -kl.mean(dim=(-1, -2))
             mse = (x1 - x2) ** 2
-            return 0.2 - 2*mse.mean(dim=(-1, -2))
+            return 0.1 - mse.mean(dim=(-1, -2))
 
         def neg(x):
-            v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
-            return torch.maximum(torch.tensor(0), v)
+            v = 1 - 2*x.mean(dim=(-1, -2))
+            e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
+            return torch.maximum(torch.tensor(0), v + e)
         def pos(x):
-            v = 2 - 2*(x.mean(dim=(-1, -2)) + 0.5)
-            return torch.maximum(torch.tensor(0), -v)
+            v = 2*x.mean(dim=(-1, -2)) - 1
+            e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
+            return torch.maximum(torch.tensor(0), -v + e)
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
@@ -149,16 +147,16 @@ class Model(pl.LightningModule):
             # select positive representatives from this class
             # positives = sample(y[c][POSITIVE], n := 10, replace=True)
             n = 150
-            positives = np.random.choice(len(y[c][POSITIVE]), n, replace=True)
+            positives = np.random.choice(len(y[c]), n, replace=True)
             # positives = [population[i] for i in indices]
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                similarity(y[c][POSITIVE][positive], y[c][POSITIVE]) * pos(b[c][POSITIVE][positive]) * pos(b[c][POSITIVE])
+                similarity(y[c][positive], y[c]) * pos(b[c][positive]) * pos(b[c])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                similarity(y[c][POSITIVE][positive], y[c][NEGATIVE]) * pos(b[c][POSITIVE][positive]) * neg(b[c][NEGATIVE])
+                similarity(y[c][positive], y[c]) * pos(b[c][positive]) * neg(b[c])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
@@ -195,11 +193,12 @@ class Model(pl.LightningModule):
                     [list(map(unpack_index, channel_regions)) for channel_regions in negative_regions],
                     self.counter.kernel_size,
                 )
-                for image, attention_map, attended_image, (positive_regions, negative_regions)
+                for image, attention_map, attended_image, positive_regions, negative_regions
                 in zip(
                     images.detach().cpu(),
                     attention_maps.detach().cpu(),
                     attended_images.detach().cpu(),
+                    sampled_regions,
                     sampled_regions,
                 )
             ]
