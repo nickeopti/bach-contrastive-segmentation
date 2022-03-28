@@ -24,7 +24,6 @@ def test_performance(version):
         channel = max(range(n_classes), key=lambda i: best_epoch[f'mdc_c{i+1}'])
 
     model: models.Model = models.Model.load_from_checkpoint(f'logs/default/version_{version}/checkpoints/epoch={epoch}-step={step}.ckpt')
-    model.eval()
 
     with torch.no_grad():
         attention_maps = model.attention_network(images)
@@ -65,7 +64,6 @@ if __name__ == '__main__':
     predictions = []
     for _, _, version, epoch, step, channel in best_values:
         model = models.Model.load_from_checkpoint(f'logs/default/version_{version}/checkpoints/epoch={epoch}-step={step}.ckpt')
-        model.eval()
         with torch.no_grad():
             attention_maps = model.attention_network(images)[:, channel]
         predictions.append(attention_maps)
