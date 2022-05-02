@@ -120,7 +120,7 @@ class Model(pl.LightningModule):
         b = [torch.stack(c) for c in a]
 
         # featurise regions; shape class, parity, prediction
-        y = [self.feature_network(c) for c in y]
+        # y = [self.feature_network(c) for c in y]
 
         def clamp(x):
             return torch.maximum(x, torch.tensor(-100))
@@ -130,16 +130,18 @@ class Model(pl.LightningModule):
             # kl = x1 * torch.log2(x1 / x2)
             # return -kl.mean(dim=(-1, -2))
             mse = (x1 - x2) ** 2
-            return 0.1 - mse.mean(dim=(-1, -2))
+            return 1 - mse.mean(dim=(-1, -2))
 
-        def neg(x):
+        def neg(x: torch.Tensor):
             v = 1 - 2*x.mean(dim=(-1, -2))
-            e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
-            return torch.maximum(torch.tensor(0), v + e)
-        def pos(x):
+            # e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
+            e = torch.normal(0, 0.1, v.shape, device=v.device)
+            return torch.maximum(torch.tensor(0, device=x.device), v + e)
+        def pos(x: torch.Tensor):
             v = 2*x.mean(dim=(-1, -2)) - 1
-            e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
-            return torch.maximum(torch.tensor(0), -v + e)
+            # e = torch.normal(torch.zeros(v.shape), torch.ones(v.shape) / 10)
+            e = torch.normal(0, 0.1, v.shape, device=v.device)
+            return torch.maximum(torch.tensor(0, device=x.device), -v + e)
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
