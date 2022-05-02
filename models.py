@@ -162,7 +162,7 @@ class Model(pl.LightningModule):
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
-                -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum()  # the sum in  `exp(pn).sum()` shall probably be replaced by a mean? 
+                -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum() * 1e-6  # the sum in  `exp(pn).sum()` shall probably be replaced by a mean? 
                 for pp, pn in zip(intra_channel_pos_pos_similarity, intra_channel_pos_neg_similarity)
             ) / n_images
             self.log("intra", intra_channel_contrastive_loss)
@@ -182,7 +182,7 @@ class Model(pl.LightningModule):
                     for intra_pp, inter_pp in zip(intra_channel_pos_pos_similarity, inter_channel_pos_pos_similarity)
                 ) / n**2 / n_images
                 self.log("inter", inter_channel_contrastive_loss)
-                loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
+                # loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
         # Plotting
         if batch_idx % 10 == 0 and self.current_epoch % 1 == 0:
