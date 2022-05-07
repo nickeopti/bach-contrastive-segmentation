@@ -66,7 +66,7 @@ class Model(pl.LightningModule):
         make_histograms: bool = False,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=['counter', 'attention_network', 'feature_network'])
 
         self.counter = counter
         self.sampler = sampler
