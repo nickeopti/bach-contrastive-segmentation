@@ -18,10 +18,10 @@ POSITIVE = 0
 NEGATIVE = 1
 
 
-def sample(population: Union[Sequence, torch.Tensor], k: int, replace=False):
-    n = len(population)
+def sample(population_a: Union[Sequence, torch.Tensor], population_b: Union[Sequence, torch.Tensor], k: int, replace=False):
+    n = len(population_a)
     indices = np.random.choice(n, k, replace=replace)
-    return [population[i] for i in indices]
+    return [population_a[i] for i in indices], [population_b[i] for i in indices]
 
 
 class Counter(nn.Module):
@@ -119,13 +119,19 @@ class Model(pl.LightningModule):
 
         # extract regions
         x = [([], []) for _ in range(n_classes)]
-        for attended_image, (positive_regions, negative_regions) in zip(attended_images, sampled_regions):
+        a = [([], []) for _ in range(n_classes)]
+        for image, attention_map, (positive_regions, negative_regions) in zip(images, attention_maps, sampled_regions):
             for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
                 for channel_index, channel_regions in enumerate(parity_regions):
                     x[channel_index][parity].extend((
-                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                        image[0, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
                         for row, col in map(unpack_index, channel_regions)
-                        if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                        if row < image.shape[-2] - self.counter.kernel_size  # disregard sentinels
+                    ))
+                    a[channel_index][parity].extend((
+                        attention_map[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                        for row, col in map(unpack_index, channel_regions)
+                        if row < attention_map.shape[-2] - self.counter.kernel_size  # disregard sentinels
                     ))
 
         if any(any(len(p) == 0 for p in c) for c in x):
@@ -133,25 +139,37 @@ class Model(pl.LightningModule):
 
         # vectorise within class, parity
         y = [tuple(map(torch.stack, c)) for c in x]
+        b = [tuple(map(torch.stack, c)) for c in a]
 
         if self.featurise:
             # featurise regions; shape class, parity, prediction
             y = [tuple(map(self.feature_network, c)) for c in y]
 
+        def neg(x: torch.Tensor):
+            v = 1 - x.mean(dim=(-1, -2))
+            e = torch.normal(0, 0.1, v.shape, device=v.device)
+            r = torch.maximum(torch.tensor(0, device=x.device), v + e)
+            return r
+        def pos(x: torch.Tensor):
+            v = x.mean(dim=(-1, -2))
+            e = torch.normal(0, 0.1, v.shape, device=v.device)
+            r = torch.maximum(torch.tensor(0, device=x.device), v + e)
+            return r
+
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
         for c in range(n_classes):
             # select positive representatives from this class
-            positives = sample(y[c][POSITIVE], n := 10, replace=True)
+            positives, a_positives = sample(y[c][POSITIVE], b[c][POSITIVE], n := 10, replace=True)
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                self.loss_function(positive, y[c][POSITIVE])
-                for positive in positives
+                self.loss_function(positive, y[c][POSITIVE]) * pos(a) * pos(b[c][POSITIVE])
+                for positive, a in zip(positives, a_positives)
             ]
             intra_channel_pos_neg_similarity = [
-                self.loss_function(positive, y[c][NEGATIVE])
-                for positive in positives
+                self.loss_function(positive, y[c][NEGATIVE]) * pos(a) * neg(b[c][NEGATIVE])
+                for positive, a in zip(positives, a_positives)
             ]
             intra_channel_contrastive_loss = sum(
                 -torch.log(torch.exp(pp) / torch.exp(pn).sum()).sum()
@@ -164,10 +182,11 @@ class Model(pl.LightningModule):
             if n_classes > 1:  # Only makes sense if more than one channel
                 # All the positive samples from all the other classes
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
+                a_all_other_classes_positives = torch.vstack([b[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    self.loss_function(positive, all_other_classes_positives)
-                    for positive in positives
+                    self.loss_function(positive, all_other_classes_positives) * pos(a) * pos(a_all_other_classes_positives)
+                    for positive, a in zip(positives, a_positives)
                 ]
                 inter_channel_contrastive_loss = sum(
                     -torch.log(torch.exp(intra_pp) / torch.exp(inter_pp).sum()).sum()
