@@ -82,12 +82,12 @@ class Model(pl.LightningModule):
         if loss == "ce":
             def l(x1, x2):
                 ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
-                return -ce.mean(dim=(-1, -2))
+                return -ce.mean(dim=(-1, -2, -3))
             self.loss_function = l
         elif loss == "mse":
             def l(x1, x2):
                 mse = (x1 - x2) ** 2
-                return -mse.mean(dim=(-1, -2))
+                return -mse.mean(dim=(-1, -2, -3))
             self.loss_function = l
         elif loss == "feature":
             self.loss_function = nn.CosineSimilarity(dim=1)
@@ -99,7 +99,7 @@ class Model(pl.LightningModule):
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         images = batch
         attention_maps = self.attention_network(images)
-        attended_images = images * attention_maps
+        attended_images = torch.stack([images[:, i, None] * attention_maps for i in range(images.shape[1])], dim=2)
 
         n_images = images.shape[0]
         n_classes = attention_maps.shape[1]
@@ -123,7 +123,7 @@ class Model(pl.LightningModule):
             for parity, parity_regions in [(POSITIVE, positive_regions), (NEGATIVE, negative_regions)]:
                 for channel_index, channel_regions in enumerate(parity_regions):
                     x[channel_index][parity].extend((
-                        attended_image[channel_index, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
+                        attended_image[channel_index, :, row:row + self.counter.kernel_size, col:col + self.counter.kernel_size]
                         for row, col in map(unpack_index, channel_regions)
                         if row < attended_image.shape[-2] - self.counter.kernel_size  # disregard sentinels
                     ))

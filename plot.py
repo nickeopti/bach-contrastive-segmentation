@@ -10,8 +10,18 @@ def class_index_from_n(n, class_indices):
     return next(i for i, (from_index, to_index) in enumerate(class_indices) if from_index <= n < to_index)
 
 
-def plotable(image):
-    return image.squeeze()
+def plotable(image: torch.Tensor):
+    if len(image.shape) == 2:
+        return image
+    elif len(image.shape) == 3:
+        if image.shape[0] == 1:
+            return image.squeeze(0)
+        elif image.shape[0] == 3:
+            return image.permute((1, 2, 0))
+        else:
+            raise RuntimeError
+    else:
+        raise RuntimeError
 
 
 def plot_selected_crops(data, path=None):

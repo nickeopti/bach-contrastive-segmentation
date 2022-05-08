@@ -59,8 +59,8 @@ def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, ar
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     if args.validate_data:
-        validation_dataset = data.MoNuSegValidationDataset(args.validate_data)
-        validation_data_loader = DataLoader(validation_dataset, batch_size=10, num_workers=args.num_workers)
+        validation_dataset = data.MoNuSegValidationDataset(args.validate_data, grey_scale=args.grey_scale)
+        validation_data_loader = DataLoader(validation_dataset, batch_size=14, shuffle=False, num_workers=args.num_workers)
 
     try:
         trainer.fit(model, train_data_loader, val_dataloaders=validation_data_loader if args.validate_data else None)

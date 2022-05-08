@@ -53,10 +53,11 @@ class MultiSamplesDataset(Dataset):
 
 
 class MoNuSegDataset(Dataset):
-    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05):
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False):
         image_files = glob.glob(os.path.join(image_directory, '*.tif'))
         images = map(Image.open, image_files)
-        images = map(Grayscale(1), images)
+        if grey_scale:
+            images = map(Grayscale(1), images)
         images = map(ToTensor(), images)
         self.images = list(images)
         self.cropper = RandomCrop(crop_size)
@@ -72,7 +73,7 @@ class MoNuSegDataset(Dataset):
 
 
 class MoNuSegValidationDataset(Dataset):
-    def __init__(self, directory, epsilon: float = 0.05):
+    def __init__(self, directory, epsilon: float = 0.05, grey_scale: bool = False):
         image_files = glob.glob(os.path.join(directory, '*tif'))
         mask_files = [
             f'{os.path.join(directory, os.path.splitext(os.path.basename(image_file))[0])}.xml'
@@ -80,7 +81,8 @@ class MoNuSegValidationDataset(Dataset):
         ]
 
         images = map(Image.open, image_files)
-        images = map(Grayscale(1), images)
+        if grey_scale:
+            images = map(Grayscale(1), images)
         images = map(ToTensor(), images)
         self.images = list(images)
 
