@@ -90,7 +90,7 @@ if __name__ == "__main__":
     while not successfully_started:
         model = models.Model(
             counter=models.Counter(args.out_channels, 50, 20),
-            loss=args.loss,
+            similarity_measure=args.loss,
             inter_channel_loss_scaling_factor=1,
             gamma=args.gamma,
             **{parameter: ca.class_type(**ca.arguments) for parameter, ca in model_parameters.items()}
