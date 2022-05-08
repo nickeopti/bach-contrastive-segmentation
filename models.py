@@ -61,7 +61,7 @@ class Model(pl.LightningModule):
         feature_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
         gamma: float = 1,
-        loss: str = "ce",
+        similarity_measure: str = "ce",
         learning_rate: float = 0.0002,
         make_histograms: bool = False,
     ):
@@ -74,23 +74,31 @@ class Model(pl.LightningModule):
         self.attention_network = attention_network
         self.feature_network = feature_network
 
-        self.cosine_similarity = nn.CosineSimilarity(dim=1)
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
         self.gamma = gamma
 
-        self.featurise = loss == "feature"
-        if loss == "ce":
-            def l(x1, x2):
+        self.featurise = similarity_measure == "feature"
+        if similarity_measure == "ce":
+            def similarity(x1, x2):
+                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
+                assert len(x1.shape) == 3
                 ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
                 return -ce.mean(dim=(-1, -2, -3))
-            self.loss_function = l
-        elif loss == "mse":
-            def l(x1, x2):
+            self.similarity_measure = similarity
+        elif similarity_measure == "mse":
+            def similarity(x1, x2):
+                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
+                assert len(x1.shape) == 3
                 mse = (x1 - x2) ** 2
                 return -mse.mean(dim=(-1, -2, -3))
-            self.loss_function = l
-        elif loss == "feature":
-            self.loss_function = nn.CosineSimilarity(dim=1)
+            self.similarity_measure = similarity
+        elif similarity_measure == "feature":
+            cosine_similarity = nn.CosineSimilarity(dim=1)
+            def similarity(x1, x2):
+                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
+                assert len(x1.shape) == 1
+                return cosine_similarity(x1, x2)
+            self.similarity_measure = similarity
 
         self.learning_rate = learning_rate
 
@@ -146,11 +154,11 @@ class Model(pl.LightningModule):
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                self.loss_function(positive, y[c][POSITIVE])
+                self.similarity_measure(positive, y[c][POSITIVE])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                self.loss_function(positive, y[c][NEGATIVE])
+                self.similarity_measure(positive, y[c][NEGATIVE])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
@@ -166,7 +174,7 @@ class Model(pl.LightningModule):
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    self.loss_function(positive, all_other_classes_positives)
+                    self.similarity_measure(positive, all_other_classes_positives)
                     for positive in positives
                 ]
                 inter_channel_contrastive_loss = sum(
