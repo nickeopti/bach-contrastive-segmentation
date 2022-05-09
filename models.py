@@ -273,9 +273,10 @@ class Model(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        images, masks = batch
-        attention_maps = self.attention_network(images)
-        predicted_masks = attention_maps > 0.5
+        with torch.no_grad():
+            images, masks = batch
+            attention_maps = self.attention_network(images)
+            predicted_masks = attention_maps > 0.5
 
         masks = masks > 0.5  # turn it into a boolean tensor
         tp = torch.logical_and(masks, predicted_masks).flatten(start_dim=2).sum(dim=2)
