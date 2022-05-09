@@ -6,6 +6,8 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from torchvision.transforms.transforms import Grayscale
+from kornia.enhance.histogram import histogram2d
 
 import plot
 from selection import Region, Sampler
@@ -79,14 +81,14 @@ class Model(pl.LightningModule):
 
         self.featurise = similarity_measure == "feature"
         if similarity_measure == "ce":
-            def similarity(x1, x2):
+            def similarity(x1: torch.Tensor, x2: torch.Tensor):
                 assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
                 assert len(x1.shape) == 3
                 ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
                 return -ce.mean(dim=(-1, -2, -3))
             self.similarity_measure = similarity
         elif similarity_measure == "mse":
-            def similarity(x1, x2):
+            def similarity(x1: torch.Tensor, x2: torch.Tensor):
                 assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
                 assert len(x1.shape) == 3
                 mse = (x1 - x2) ** 2
@@ -94,11 +96,47 @@ class Model(pl.LightningModule):
             self.similarity_measure = similarity
         elif similarity_measure == "feature":
             cosine_similarity = nn.CosineSimilarity(dim=1)
-            def similarity(x1, x2):
+            def similarity(x1: torch.Tensor, x2: torch.Tensor):
                 assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
                 assert len(x1.shape) == 1
                 return cosine_similarity(x1, x2)
             self.similarity_measure = similarity
+        elif similarity_measure == "mi":
+            grey_scale = Grayscale(1)
+            def similarity(x1: torch.Tensor, x2: torch.Tensor):
+                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
+                assert len(x1.shape) == 3
+                if len(x2.shape) == 3:
+                    x2 = x2.unsqueeze(0)
+                def mi(v1, v2):
+                    v1 = grey_scale(v1).flatten(start_dim=1)
+                    v2 = grey_scale(v2).flatten(start_dim=1)
+                    joint_histogram = histogram2d(v1, v2, bins=torch.linspace(0, 1, 25, device=v1.device), bandwidth=torch.tensor(0.9))
+                    p_xy = joint_histogram / joint_histogram.sum()
+                    p_x = p_xy.sum(dim=2)
+                    p_y = p_xy.sum(dim=1)
+                    p_x_p_y = p_x[:, :, None] * p_y[:, None, :]
+                    mi = (p_xy * torch.log2(p_xy / p_x_p_y)).sum(dim=(1, 2))
+                    return mi
+                b = x2.shape[0]
+                x1 = x1.repeat(b, 1, 1).reshape(b, *x1.shape)
+                return mi(x1, x2)
+            self.similarity_measure = similarity
+        elif similarity_measure == "kl":
+            grey_scale = Grayscale(1)
+            kl_divergence = nn.KLDivLoss(reduction="batchmean", log_target=True)
+            def similarity(x1, x2):
+                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
+                assert len(x1.shape) == 3
+                if len(x2.shape) == 3:
+                    x2 = x2.unsqueeze(0)
+                v1 = torch.maximum(grey_scale(x1).flatten().log(), torch.tensor(-100))
+                v2 = torch.maximum(grey_scale(x2).flatten(start_dim=1).log(), torch.tensor(-100))
+                divergence = torch.stack([kl_divergence(v1, v) for v in v2])
+                return -divergence
+            self.similarity_measure = similarity
+        else:
+            raise RuntimeError(f"Unknown similarity measure {similarity_measure!r}")
 
         self.learning_rate = learning_rate
 
