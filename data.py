@@ -10,9 +10,11 @@ from torch.utils.data import Dataset
 from torchvision.transforms import ToTensor
 from torchvision.transforms.transforms import Grayscale, RandomCrop
 
+import scipy.io
 import skimage.draw
 import xml.etree.ElementTree as ET
 import numpy as np
+
 
 
 class SamplesDataset(Dataset):
@@ -72,8 +74,19 @@ class MoNuSegDataset(Dataset):
         return (1 - self.epsilon) * image + self.epsilon
 
 
+class MoNuSegWSIDataset(Dataset):
+    def __init__(self, directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False) -> None:
+        image_files = glob.glob(os.path.join(directory, '*', '*.svs'))
+
+        # slide = openslide.OpenSlide(image_files[0])
+        # slide.dimensions
+        # r = slide.read_region((100000,80000), 0, (10, 10))
+        # t = ToTensor()(r)
+
+
+
 class MoNuSegValidationDataset(Dataset):
-    def __init__(self, directory, epsilon: float = 0.05, grey_scale: bool = False):
+    def __init__(self, directory: str, epsilon: float = 0.05, grey_scale: bool = False):
         image_files = glob.glob(os.path.join(directory, '*tif'))
         mask_files = [
             f'{os.path.join(directory, os.path.splitext(os.path.basename(image_file))[0])}.xml'
@@ -141,7 +154,7 @@ class GlaSDataset(Dataset):
 
 
 class GlaSValidationDataset(Dataset):
-    def __init__(self, directory, epsilon: float = 0.05):
+    def __init__(self, directory: str, epsilon: float = 0.05):
         files = glob.glob(os.path.join(directory, '*.bmp'))
         image_files = [f for f in files if 'anno' not in f]
         mask_files = [f for f in files if 'anno' in f]
@@ -165,6 +178,57 @@ class GlaSValidationDataset(Dataset):
         image = self.images[idx]
         mask = self.masks[idx]
         return (1 - self.epsilon) * image + self.epsilon, mask
+
+
+class CoNSePDataset(Dataset):
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False):
+        image_files = glob.glob(os.path.join(image_directory, 'Images', '*.png'))
+        images = map(Image.open, image_files)
+        if grey_scale:
+            images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+        self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx][:3]  # Remove alpha band
+        image = self.cropper(image)
+        return (1 - self.epsilon) * image + self.epsilon
+
+
+class CoNSePValidationDataset(Dataset):
+    def __init__(self, directory: str, epsilon: float = 0.05, grey_scale: bool = False):
+        image_files = glob.glob(os.path.join(directory, 'Images', '*.png'))
+        mask_files = [
+            f'{os.path.join(directory, "Labels", os.path.splitext(os.path.basename(image_file))[0])}.mat'
+            for image_file in image_files
+        ]
+
+        images = map(Image.open, image_files)
+        if grey_scale:
+            images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+
+        masks = map(scipy.io.loadmat, mask_files)
+        masks = [mask['inst_map'] > 0 for mask in masks]
+        masks = map(torch.Tensor, masks)
+        self.masks = list(masks)
+
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx][:3]  # Remove alpha band
+        mask = self.masks[idx]
+        return (1 - self.epsilon) * image + self.epsilon, mask.unsqueeze(0)
+
 
 
 def plotable(image):
