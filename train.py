@@ -1,6 +1,6 @@
 import os.path
 from argparse import ArgumentParser
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pytorch_lightning as pl
 import torch
@@ -54,16 +54,16 @@ def create_trainer(args) -> pl.Trainer:
     return trainer
 
 
-def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, args):
+def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, validation_dataset_info: Optional[arguments.ClassArguments], args):
     dataset = dataset_info.class_type(**dataset_info.arguments)
     train_data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
-    if args.validate_data:
-        validation_dataset = data.MoNuSegValidationDataset(args.validate_data, grey_scale=args.grey_scale)
-        validation_data_loader = DataLoader(validation_dataset, batch_size=14, shuffle=False, num_workers=args.num_workers)
+    if validation_dataset_info:
+        validation_dataset = validation_dataset_info.class_type(**validation_dataset_info.arguments)
+        validation_data_loader = DataLoader(validation_dataset, batch_size=len(validation_dataset), shuffle=False, num_workers=args.num_workers)
 
     try:
-        trainer.fit(model, train_data_loader, val_dataloaders=validation_data_loader if args.validate_data else None)
+        trainer.fit(model, train_data_loader, val_dataloaders=validation_data_loader if validation_dataset_info else None)
     except RuntimeError as exc:
         if "element 0 of tensors does not require grad" not in str(exc):
             raise exc
@@ -71,8 +71,8 @@ def train(model, trainer: pl.Trainer, dataset_info: arguments.ClassArguments, ar
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    dataset_info = arguments.add_options(parser, "dataset", (data.SamplesDataset, data.MoNuSegDataset, data.MultiSamplesDataset, data.GlaSDataset, data.GlaSValidationDataset))
-    dataset_validation = parser.add_argument("--validate_data", type=str, default=None)
+    dataset_info = arguments.add_options(parser, "dataset", (data.SamplesDataset, data.MoNuSegDataset, data.MultiSamplesDataset, data.GlaSDataset, data.CoNSePDataset))
+    validation_dataset_info = arguments.add_options(parser, "validation_dataset", (None, data.MoNuSegValidationDataset, data.GlaSValidationDataset, data.CoNSePValidationDataset))
     parser.add_argument("--model_checkpoint", type=str)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -99,6 +99,6 @@ if __name__ == "__main__":
         if args.model_checkpoint is not None:
             model.load_from_checkpoint(args.model_checkpoint)
 
-        train(model, trainer, dataset_info, args)
+        train(model, trainer, dataset_info, validation_dataset_info, args)
 
         successfully_started = os.path.exists(f"{trainer.logger.log_dir}/metrics.csv")
