@@ -230,6 +230,53 @@ class CoNSePValidationDataset(Dataset):
         return (1 - self.epsilon) * image + self.epsilon, mask.unsqueeze(0)
 
 
+class TNBCDataset(Dataset):
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False):
+        image_files = glob.glob(os.path.join(image_directory, 'Slide_*', '*.png'))
+        images = map(Image.open, image_files)
+        if grey_scale:
+            images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+        self.cropper = RandomCrop(crop_size)
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx][:3]  # Remove alpha band
+        image = self.cropper(image)
+        return (1 - self.epsilon) * image + self.epsilon
+
+
+class TNBCValidationDataset(Dataset):
+    def __init__(self, directory: str, epsilon: float = 0.05, grey_scale: bool = False):
+        image_files = glob.glob(os.path.join(directory, 'Slide_*', '*.png'))
+        mask_files = [image_file.replace('Slide', 'GT') for image_file in image_files]
+
+        images = map(Image.open, image_files)
+        if grey_scale:
+            images = map(Grayscale(1), images)
+        images = map(ToTensor(), images)
+        self.images = list(images)
+
+        masks = map(Image.open, mask_files)
+        masks = map(Grayscale(1), masks)
+        masks = map(ToTensor(), masks)
+        masks = [(mask > 0).type(torch.float) for mask in masks]
+        self.masks = list(masks)
+
+        self.epsilon = epsilon
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx][:3]  # Remove alpha band
+        mask = self.masks[idx]
+        return (1 - self.epsilon) * image + self.epsilon, mask
+
 
 def plotable(image):
     return torch.moveaxis(image, 0, -1)
