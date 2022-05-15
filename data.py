@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from torchvision.transforms import ToTensor
 from torchvision.transforms.transforms import Grayscale, RandomCrop
 
+import openslide
 import scipy.io
 import skimage.draw
 import xml.etree.ElementTree as ET
@@ -75,14 +76,34 @@ class MoNuSegDataset(Dataset):
 
 
 class MoNuSegWSIDataset(Dataset):
-    def __init__(self, directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False) -> None:
-        image_files = glob.glob(os.path.join(directory, '*', '*.svs'))
+    def __init__(self, image_directory: str, crop_size: int = 250, epsilon: float = 0.05, grey_scale: bool = False) -> None:
+        self.image_files = glob.glob(os.path.join(image_directory, '*', '*.svs'))
 
-        # slide = openslide.OpenSlide(image_files[0])
-        # slide.dimensions
-        # r = slide.read_region((100000,80000), 0, (10, 10))
-        # t = ToTensor()(r)
+        self.crop_size = crop_size
+        self.epsilon = epsilon
+        self.grey_scale = grey_scale
 
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        image_file = self.image_files[idx]
+
+        slide = openslide.OpenSlide(image_file)
+        n_rows, n_cols = slide.dimensions
+
+        row = random.randint(0, n_rows - self.crop_size)
+        col = random.randint(0, n_cols - self.crop_size)
+
+        tile = slide.read_region(location=(row, col), level=0, size=(self.crop_size, self.crop_size))
+        tile = ToTensor()(tile)[:3]
+
+        likely_background_pixels = (tile > 0.7).prod(dim=0)
+        number_of_likely_background_pixels = likely_background_pixels.sum()
+        if number_of_likely_background_pixels > 0.3 * torch.tensor(tile.shape)[1:].prod():
+            return self.__getitem__(idx)
+
+        return (1 - self.epsilon) * tile + self.epsilon
 
 
 class MoNuSegValidationDataset(Dataset):
