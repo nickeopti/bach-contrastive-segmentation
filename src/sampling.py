@@ -28,7 +28,7 @@ class Sampler:
 
     @abstractmethod
     def sample(self, values: torch.Tensor) -> torch.Tensor:
-        pass
+        ...
 
 
 class UniformSampler(Sampler):
@@ -44,7 +44,7 @@ class ProbabilisticSampler(Sampler):
     def sample(self, values: torch.Tensor) -> torch.Tensor:
         maxes = values.max(dim=-1, keepdim=True).values
         normalised_values = values / maxes
-        
+
         exponentiated_values = normalised_values ** self.alpha
 
         sums = exponentiated_values.sum(dim=-1, keepdim=True)
@@ -101,7 +101,7 @@ class TopKSampler(Sampler):
     def __init__(self, n: int = 10, k: int = 50) -> None:
         super().__init__(n)
         self.k = k
-    
+
     def sample(self, values: torch.Tensor) -> torch.Tensor:
         top_k_positive_indices = torch.topk(values, k=self.k, dim=-1).indices
         top_k_negative_indices = torch.topk(-values, k=values.shape[-1] - self.k, dim=-1).indices

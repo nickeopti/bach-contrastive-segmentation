@@ -1,13 +1,7 @@
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 import numpy as np
 import torch
-
-
-COLOURS = ['green', 'red', 'darkorange', 'black', 'white']
-
-def class_index_from_n(n, class_indices):
-    return next(i for i, (from_index, to_index) in enumerate(class_indices) if from_index <= n < to_index)
+from matplotlib.patches import Rectangle
 
 
 def plotable(image: torch.Tensor):
@@ -24,7 +18,7 @@ def plotable(image: torch.Tensor):
         raise RuntimeError
 
 
-def plot_selected_crops(data, path=None):
+def plot_selected_crops(data, path=None, dpi=300):
     if len(data) <= 1:
         return
 
@@ -70,40 +64,13 @@ def plot_selected_crops(data, path=None):
         plt.show()
     else:
         fig.tight_layout()
-        fig.savefig(path, dpi=300)
-    plt.close()
-
-
-def plot_histograms(data, path=None):
-    if len(data) <= 1:
-        return
-
-    n = min(len(data), 10)
-    n_channels = len(data[1][1])
-    fig, axs = plt.subplots(
-        1 + 2 * n_channels, n, figsize=(n, 1 + 2 * n_channels)
-    )
-    for i, (image, attended_image, attentions) in enumerate(data[:n]):
-        axs[0][i].imshow(plotable(image))
-        axs[0][i].axis("off")
-        for j, attended_channel in enumerate(attended_image, start=1):
-            axs[j][i].imshow(plotable(attended_channel))
-            axs[j][i].axis("off")
-        for j, channel_attentions in enumerate(attentions, start=1+n_channels):
-            axs[j][i].hist(channel_attentions, bins=20)
-            axs[j][i].axis("off")
-
-    if path is None:
-        plt.show()
-    else:
-        fig.tight_layout()
-        fig.savefig(path, dpi=300)
+        fig.savefig(path, dpi=dpi)
     plt.close()
 
 
 markings = np.array([(0, 0, 0, 0), (0, 255, 50, 255)])
 contours = np.array([(0, 0, 0, 0), (0, 0, 255, 255), (0, 255, 0, 255), (255, 0, 0, 255)])
-def plot_mask(images, masks, attention_maps, path=None):
+def plot_mask(images, masks, attention_maps, path=None, dpi=300):
     assert len(images) == len(masks) == len(attention_maps)
     n = len(images)
     n_channels = len(attention_maps[1])
@@ -130,5 +97,37 @@ def plot_mask(images, masks, attention_maps, path=None):
         plt.show()
     else:
         fig.tight_layout()
-        fig.savefig(path, dpi=300)
+        fig.savefig(path, dpi=dpi)
+    plt.close()
+
+
+def plot_mask_2(images, masks, attention_maps, predictions, path=None, dpi=300):
+    assert len(images) == len(masks) == len(attention_maps)
+    n = len(images)
+    n_channels = len(attention_maps[1])
+    fig, axs = plt.subplots(2 + 2 * n_channels, n, figsize=(n, 2 + 2 * n_channels))
+    for i, (image, mask, attention_map, prediction) in enumerate(zip(images, masks, attention_maps, predictions)):
+        axs[0][i].imshow(plotable(image))
+        
+        if mask.dim() == 3:
+            mask = mask.squeeze(0)
+        mask = mask.type(torch.IntTensor)
+        axs[1][i].imshow(markings[mask])
+
+        for j, (attention_map_channel, prediction_channel) in enumerate(zip(attention_map, prediction), start=0):
+            axs[2*j+2][i].imshow(plotable(attention_map_channel))
+            # diffs = (attention_map_channel > 0.5).squeeze(0).type(torch.IntTensor)
+            diffs = prediction_channel
+            diffs[torch.logical_and(diffs, 1 - mask)] = 3
+            diffs[torch.logical_and(1 - diffs, mask)] = 2
+            axs[2*j+3][i].imshow(contours[diffs])
+        
+        for j in range(2 + 2 * n_channels):
+            axs[j][i].axis("off")
+    
+    if path is None:
+        plt.show()
+    else:
+        fig.tight_layout()
+        fig.savefig(path, dpi=dpi)
     plt.close()

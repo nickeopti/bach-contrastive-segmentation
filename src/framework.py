@@ -1,16 +1,14 @@
-import pathlib
-import threading
-from typing import List, Sequence, Tuple, Union
+from dataclasses import dataclass
+from typing import Callable, List, Sequence, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from torchvision.transforms.transforms import Grayscale
-from kornia.enhance.histogram import histogram2d
 
-import plot
 from selection import Region, Sampler
+from src.similarity import SimilarityMeasure
+import src.util.events
 
 Image = List
 Channel = List
@@ -48,10 +46,25 @@ class Counter(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.f(x) / self.kernel_size ** 2
-    
+
     def count(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Size]:
         counts: torch.Tensor = self(x)
         return counts.flatten(start_dim=-2), counts.shape
+
+
+@dataclass
+class LoggedInfo:
+    epoch: int
+    batch_idx: int
+    log_dir: str
+    images: torch.Tensor
+    attention_maps: torch.Tensor
+    attended_images: torch.Tensor = None
+    regions: torch.Tensor = None
+    sampled_regions: torch.Tensor = None
+    unpack_index: Callable = None
+    kernel_size: int = None
+    masks: torch.Tensor = None
 
 
 class Model(pl.LightningModule):
@@ -59,92 +72,39 @@ class Model(pl.LightningModule):
         self,
         counter: Counter,
         sampler: Sampler,
-        attention_network: nn.Module,
-        feature_network: nn.Module,
+        similarity_measure: SimilarityMeasure,
+        confidence_network: nn.Module,
+        featuriser_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
         gamma: float = 1,
-        similarity_measure: str = "ce",
         learning_rate: float = 0.0002,
         make_histograms: bool = False,
+        info_to_log: dict[str, str] = {},  # logged as hyperparameters by self.save_hyperparameters call
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=['counter', 'attention_network', 'feature_network'])
+        self.save_hyperparameters()
+        # self.save_hyperparameters(ignore=['counter', 'attention_network', 'feature_network'])
 
         self.counter = counter
         self.sampler = sampler
+        self.similarity_measure = similarity_measure
 
-        self.attention_network = attention_network
-        self.feature_network = feature_network
+        self.confidence_network = confidence_network
+        self.featuriser_network = featuriser_network
 
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
         self.gamma = gamma
 
-        self.featurise = similarity_measure == "feature"
-        if similarity_measure == "ce":
-            def similarity(x1: torch.Tensor, x2: torch.Tensor):
-                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
-                assert len(x1.shape) == 3
-                ce = -(x1 * torch.log2(x2) + (1 - x1) * torch.log2(1 - x2))
-                return -ce.mean(dim=(-1, -2, -3))
-            self.similarity_measure = similarity
-        elif similarity_measure == "mse":
-            def similarity(x1: torch.Tensor, x2: torch.Tensor):
-                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
-                assert len(x1.shape) == 3
-                mse = (x1 - x2) ** 2
-                return -mse.mean(dim=(-1, -2, -3))
-            self.similarity_measure = similarity
-        elif similarity_measure == "feature":
-            cosine_similarity = nn.CosineSimilarity(dim=1)
-            def similarity(x1: torch.Tensor, x2: torch.Tensor):
-                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
-                assert len(x1.shape) == 1
-                return cosine_similarity(x1, x2)
-            self.similarity_measure = similarity
-        elif similarity_measure == "mi":
-            grey_scale = Grayscale(1)
-            def similarity(x1: torch.Tensor, x2: torch.Tensor):
-                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
-                assert len(x1.shape) == 3
-                if len(x2.shape) == 3:
-                    x2 = x2.unsqueeze(0)
-                def mi(v1, v2):
-                    v1 = grey_scale(v1).flatten(start_dim=1)
-                    v2 = grey_scale(v2).flatten(start_dim=1)
-                    joint_histogram = histogram2d(v1, v2, bins=torch.linspace(0, 1, 25, device=v1.device), bandwidth=torch.tensor(0.9))
-                    p_xy = joint_histogram / joint_histogram.sum()
-                    p_x = p_xy.sum(dim=2)
-                    p_y = p_xy.sum(dim=1)
-                    p_x_p_y = p_x[:, :, None] * p_y[:, None, :]
-                    mi = (p_xy * torch.log2(p_xy / p_x_p_y)).sum(dim=(1, 2))
-                    return mi
-                b = x2.shape[0]
-                x1 = x1.repeat(b, 1, 1).reshape(b, *x1.shape)
-                return mi(x1, x2)
-            self.similarity_measure = similarity
-        elif similarity_measure == "kl":
-            grey_scale = Grayscale(1)
-            kl_divergence = nn.KLDivLoss(reduction="batchmean", log_target=True)
-            def similarity(x1, x2):
-                assert x1.shape == x2.shape or x1.shape == x2.shape[1:]
-                assert len(x1.shape) == 3
-                if len(x2.shape) == 3:
-                    x2 = x2.unsqueeze(0)
-                v1 = torch.maximum(grey_scale(x1).flatten().log(), torch.tensor(-100))
-                v2 = torch.maximum(grey_scale(x2).flatten(start_dim=1).log(), torch.tensor(-100))
-                divergence = torch.stack([kl_divergence(v1, v) for v in v2])
-                return -divergence
-            self.similarity_measure = similarity
-        else:
-            raise RuntimeError(f"Unknown similarity measure {similarity_measure!r}")
-
         self.learning_rate = learning_rate
 
         self.make_histograms = make_histograms
+    
+    def forward(self, x):
+        return self.confidence_network(x)
 
     def training_step(self, batch: torch.Tensor, batch_idx: int):
         images = batch
-        attention_maps = self.attention_network(images)
+        attention_maps = self.confidence_network(images)
         attended_images = torch.stack([images[:, i, None] * attention_maps for i in range(images.shape[1])], dim=2)
 
         n_images = images.shape[0]
@@ -180,9 +140,9 @@ class Model(pl.LightningModule):
         # vectorise within class, parity
         y = [tuple(map(torch.stack, c)) for c in x]
 
-        if self.featurise:
+        if self.similarity_measure.featurised:
             # featurise regions; shape class, parity, prediction
-            y = [tuple(map(self.feature_network, c)) for c in y]
+            y = [tuple(map(self.featuriser_network, c)) for c in y]
 
         # contrast regions:
         loss = torch.zeros(1, device=batch.device)
@@ -192,11 +152,11 @@ class Model(pl.LightningModule):
 
             # Intra-channel contrastive loss:
             intra_channel_pos_pos_similarity = [
-                self.similarity_measure(positive, y[c][POSITIVE])
+                self.similarity_measure.similarity(positive, y[c][POSITIVE])
                 for positive in positives
             ]
             intra_channel_pos_neg_similarity = [
-                self.similarity_measure(positive, y[c][NEGATIVE])
+                self.similarity_measure.similarity(positive, y[c][NEGATIVE])
                 for positive in positives
             ]
             intra_channel_contrastive_loss = sum(
@@ -212,7 +172,7 @@ class Model(pl.LightningModule):
                 all_other_classes_positives = torch.vstack([y[i][POSITIVE] for i in range(len(y)) if i != c])
 
                 inter_channel_pos_pos_similarity = [
-                    self.similarity_measure(positive, all_other_classes_positives)
+                    self.similarity_measure.similarity(positive, all_other_classes_positives)
                     for positive in positives
                 ]
                 inter_channel_contrastive_loss = sum(
@@ -222,60 +182,33 @@ class Model(pl.LightningModule):
                 self.log("inter", inter_channel_contrastive_loss)
                 loss += self.inter_channel_loss_scaling_factor * inter_channel_contrastive_loss
 
-        # Plotting
-        if batch_idx % 10 == 0 and self.current_epoch % 5 == 0:
-            to_plot = [
-                (
-                    image,
-                    attention_map,
-                    attended_image.detach().cpu(),
-                    [list(map(unpack_index, channel_regions)) for channel_regions in positive_regions],
-                    [list(map(unpack_index, channel_regions)) for channel_regions in negative_regions],
-                    self.counter.kernel_size,
-                )
-                for image, attention_map, attended_image, (positive_regions, negative_regions)
-                in zip(
-                    images.detach().cpu(),
-                    attention_maps.detach().cpu(),
-                    attended_images.detach().cpu(),
-                    sampled_regions,
-                )
-            ]
-
-            plots_path = f"{self.logger.log_dir}/plots"
-            pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
-            threading.Thread(target=plot.plot_selected_crops, args=(to_plot, f"{plots_path}/selection_{self.current_epoch}_{batch_idx}.png")).start()
-
-            if self.make_histograms:
-                to_histogram = [
-                    (
-                        image.detach().cpu(),
-                        attention_map.detach().cpu(),
-                        [
-                            [region.attention for region in channel]
-                            for channel in regions
-                        ],
-                    )
-                    for image, attention_map, regions in zip(images, attention_maps, regions)
-                ]
-                plot.plot_histograms(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")
-                threading.Thread(target=plot.plot_histograms, args=(to_histogram, f"{plots_path}/histogram_{self.current_epoch}_{batch_idx}.png")).start()
+        # Facilitate external plotting
+        src.util.events.post_event(
+            src.util.events.EventTypes.END_OF_TRAINING_BATCH,
+            data=LoggedInfo(
+                epoch=self.current_epoch,
+                batch_idx=batch_idx,
+                log_dir=self.logger.log_dir,
+                images=images.detach(),
+                attention_maps=attention_maps.detach(),
+                attended_images=attended_images.detach(),
+                regions=regions.detach(),
+                sampled_regions=sampled_regions,
+                unpack_index=unpack_index,
+                kernel_size=self.counter.kernel_size,
+            )
+        )
 
         if loss == 0:
             return None
-
-        regulariser = (0.5 - torch.abs(attention_maps - 0.5)).sum() / torch.tensor(attention_maps.shape[-2:]).prod()
-        self.log("reg", regulariser)
-        loss += self.gamma * regulariser
-
         self.log("loss", loss)
 
         return loss
-    
+
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
             images, masks = batch
-            attention_maps = self.attention_network(images)
+            attention_maps = self.confidence_network(images)
             predicted_masks = attention_maps > 0.5
 
         masks = masks > 0.5  # turn it into a boolean tensor
@@ -288,10 +221,17 @@ class Model(pl.LightningModule):
             for i, channel_score in enumerate(image_scores, start=1):
                 self.log(f"mdc_c{i}", channel_score)
 
-        if self.current_epoch % 5 == 0 and batch_idx == 0:
-            plots_path = f"{self.logger.log_dir}/plots"
-            pathlib.Path(plots_path).mkdir(parents=True, exist_ok=True)
-            threading.Thread(target=plot.plot_mask, args=(images.cpu(), masks.cpu(), attention_maps.cpu(), f"{plots_path}/validation_{self.current_epoch}_{batch_idx}.png")).start()
+        src.util.events.post_event(
+            src.util.events.EventTypes.END_OF_VALIDATION_BATCH,
+            data=LoggedInfo(
+                epoch=self.current_epoch,
+                batch_idx=batch_idx,
+                log_dir=self.logger.log_dir,
+                images=images,
+                attention_maps=attention_maps,
+                masks=masks
+            )
+        )
 
         return dice_scores
 
