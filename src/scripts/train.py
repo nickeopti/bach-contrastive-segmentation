@@ -38,7 +38,6 @@ def get_arguments(parser: ArgumentParser):
     featuriser_network = src.util.arguments.add_options(parser, 'featuriser_network', AVAILABLE_FEATURISER_NETWORKS)
 
     parser.add_argument('--patch_size', type=int, default=50)
-    parser.add_argument('--gamma', type=float, default=0)
 
     parser.add_argument('--learning_rate', type=float, default=0.0002)
     parser = pl.Trainer.add_argparse_args(parser)
@@ -128,7 +127,6 @@ def main() -> None:
         confidence_network=confidence_network,
         featuriser_network=featuriser_network,
         inter_channel_loss_scaling_factor=1,
-        gamma=args.gamma,
         learning_rate=args.learning_rate,
         info_to_log=vars(args)
     )

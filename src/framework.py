@@ -1,19 +1,16 @@
 from dataclasses import dataclass
-from typing import Callable, List, Sequence, Tuple, Union
+from typing import Callable, Sequence, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 
-from selection import Region, Sampler
-from src.similarity import SimilarityMeasure
 import src.util.events
+from src.sampling import Sampler
+from src.similarity import SimilarityMeasure
 
-Image = List
-Channel = List
-Regions = List[Region]
-
+# Indices
 POSITIVE = 0
 NEGATIVE = 1
 
@@ -76,9 +73,7 @@ class Model(pl.LightningModule):
         confidence_network: nn.Module,
         featuriser_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
-        gamma: float = 1,
         learning_rate: float = 0.0002,
-        make_histograms: bool = False,
         info_to_log: dict[str, str] = {},  # logged as hyperparameters by self.save_hyperparameters call
     ):
         super().__init__()
@@ -93,11 +88,8 @@ class Model(pl.LightningModule):
         self.featuriser_network = featuriser_network
 
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
-        self.gamma = gamma
 
         self.learning_rate = learning_rate
-
-        self.make_histograms = make_histograms
     
     def forward(self, x):
         return self.confidence_network(x)
