@@ -3,5 +3,5 @@ logs/
 venv/
 .DS_Store
 *.egg-info
-data/
+/data/
 .mypy_cache
