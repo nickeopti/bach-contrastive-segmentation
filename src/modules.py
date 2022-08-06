@@ -24,7 +24,7 @@ class ResidualBlock(nn.Module):
         return x + residual
 
 
-class AttentionNetwork(nn.Module):
+class ConfidenceNetwork(nn.Module):
     conv2d_settings = [
         dict(kernel_size=3, stride=1, padding=pd, dilation=pd, bias=False)
         for pd in (1, 2, 3, 5, 10, 20)
@@ -56,7 +56,7 @@ class AttentionNetwork(nn.Module):
         return self.f(x)
 
 
-class TypeNetwork(nn.Module):
+class FeatureNetwork(nn.Module):
     def __init__(self, in_feature_channels: int = 1):
         super().__init__()
         self.f = nn.Sequential(

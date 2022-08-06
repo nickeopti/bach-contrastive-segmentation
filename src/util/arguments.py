@@ -1,18 +1,12 @@
 import inspect
 from argparse import ArgumentParser, _StoreAction
-from dataclasses import dataclass
-from typing import Any, Dict, Sequence, Type, TypeVar
+from types import ModuleType
+from typing import Sequence, Type, TypeVar
 
 T = TypeVar("T")
 
 
-@dataclass
-class ClassArguments:
-    class_type: Type[object]
-    arguments: Dict[str, Any]
-
-
-def add_options(argument_parser: ArgumentParser, name: str, options: Sequence[Type[T]]) -> ClassArguments:
+def add_options(argument_parser: ArgumentParser, name: str, options: Sequence[Type[T]]) -> T:
     argument_group = argument_parser.add_argument_group(name)
 
     argument_group.add_argument(f"--{name}", type=str, default=options[0].__name__ if options[0] is not None else None)
@@ -39,25 +33,19 @@ def add_options(argument_parser: ArgumentParser, name: str, options: Sequence[Ty
     temp_args, _ = argument_parser.parse_known_args()
     argument_values = {argument.name: vars(temp_args)[argument.name] for argument in arguments}
 
-    return ClassArguments(selected_class, argument_values)
+    return selected_class(**argument_values)
+
+
+def add_options_from_module(argument_parser: ArgumentParser, name: str, module: ModuleType, of_subclass: Type[T]) -> T:
+    def predicate(obj):
+        return inspect.isclass(obj) and issubclass(obj, of_subclass)
+    valid_classes = inspect.getmembers(module, predicate)
+    options = [valid_class for _, valid_class in valid_classes]
+
+    return add_options(argument_parser, name, options)
 
 
 def _get_arguments(from_object: Type[object], excluded_parameters=('self', 'cls', 'device')):
     signature = inspect.signature(from_object.__init__)
     parameters = {k: p for k, p in signature.parameters.items() if p.kind == p.POSITIONAL_OR_KEYWORD}
     return [parameter for parameter in parameters.values() if parameter.name not in excluded_parameters]
-
-
-if __name__ == "__main__":
-    parser = ArgumentParser()
-
-    import selection
-    available_selectors = [
-        selection.SingleChannelQuantileSelector,
-        selection.MultiChannelQuantileSelector,
-    ]
-
-    parser = add_options(parser, "selector", available_selectors)
-
-    args = parser.parse_args()
-    print(args)
