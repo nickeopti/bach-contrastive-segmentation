@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
+FROM nvidia/cuda:11.6.1-cudnn8-runtime-ubuntu20.04
 
 ENV TZ=Europe/Copenhagen
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -12,7 +12,7 @@ RUN tar -xf Python-3.10.6.tgz
 RUN cd Python-3.10.6 && ./configure --enable-optimizations && make install
 
 RUN pip3 install --upgrade pip
-RUN pip3 install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu113
+RUN pip3 install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu116
 RUN apt install openslide-tools -y
 
 WORKDIR /home/code
@@ -22,6 +22,3 @@ COPY setup.py .
 RUN pip3 install -e .
 
 WORKDIR /home
-
-# run with eg
-# $ sudo docker run -it -v $(pwd)/data:/home/data 4b64b383d62c
