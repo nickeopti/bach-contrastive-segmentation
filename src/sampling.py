@@ -1,22 +1,6 @@
 from abc import abstractmethod
-from dataclasses import dataclass
-from typing import List, Tuple
 
 import torch
-
-
-@dataclass
-class Region:
-    row: int
-    col: int
-    channel: int
-
-    size: int
-    attention: float
-
-
-Regions = List[Region]
-Contrastive = Tuple[Regions, Regions]
 
 
 class Sampler:
