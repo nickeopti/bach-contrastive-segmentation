@@ -90,7 +90,7 @@ class Model(pl.LightningModule):
         self.inter_channel_loss_scaling_factor = inter_channel_loss_scaling_factor
 
         self.learning_rate = learning_rate
-    
+
     def forward(self, x):
         return self.confidence_network(x)
 

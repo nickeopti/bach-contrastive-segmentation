@@ -34,7 +34,7 @@ def plot_selected_crops(data, path=None, dpi=300):
             axs[1 + n_channels + j][i].imshow(plotable(attended_image[j]))
 
         for j in range(1, 1 + 2 * n_channels):
-            for row, col in positive_regions[(j-1) % n_channels]:
+            for row, col in positive_regions[(j - 1) % n_channels]:
                 axs[j][i].add_patch(
                     Rectangle(
                         (col, row),
@@ -45,7 +45,7 @@ def plot_selected_crops(data, path=None, dpi=300):
                         facecolor="none",
                     )
                 )
-            for row, col in negative_regions[(j-1) % n_channels]:
+            for row, col in negative_regions[(j - 1) % n_channels]:
                 axs[j][i].add_patch(
                     Rectangle(
                         (col, row),
@@ -56,7 +56,7 @@ def plot_selected_crops(data, path=None, dpi=300):
                         facecolor="none",
                     )
                 )
-        
+
         for j in range(1 + 2 * n_channels):
             axs[j][i].axis("off")
 
@@ -70,6 +70,8 @@ def plot_selected_crops(data, path=None, dpi=300):
 
 markings = np.array([(0, 0, 0, 0), (0, 255, 50, 255)])
 contours = np.array([(0, 0, 0, 0), (0, 0, 255, 255), (0, 255, 0, 255), (255, 0, 0, 255)])
+
+
 def plot_mask(images, masks, attention_maps, path=None, dpi=300):
     assert len(images) == len(masks) == len(attention_maps)
     n = len(images)
@@ -77,22 +79,22 @@ def plot_mask(images, masks, attention_maps, path=None, dpi=300):
     fig, axs = plt.subplots(2 + 2 * n_channels, n, figsize=(n, 2 + 2 * n_channels))
     for i, (image, mask, attention_map) in enumerate(zip(images, masks, attention_maps)):
         axs[0][i].imshow(plotable(image))
-        
+
         if mask.dim() == 3:
             mask = mask.squeeze(0)
         mask = mask.type(torch.IntTensor)
         axs[1][i].imshow(markings[mask])
 
         for j, attention_map_channel in enumerate(attention_map, start=0):
-            axs[2*j+2][i].imshow(plotable(attention_map_channel))
+            axs[2 * j + 2][i].imshow(plotable(attention_map_channel))
             diffs = (attention_map_channel > 0.5).squeeze(0).type(torch.IntTensor)
             diffs[torch.logical_and(diffs, 1 - mask)] = 3
             diffs[torch.logical_and(1 - diffs, mask)] = 2
-            axs[2*j+3][i].imshow(contours[diffs])
-        
+            axs[2 * j + 3][i].imshow(contours[diffs])
+
         for j in range(2 + 2 * n_channels):
             axs[j][i].axis("off")
-    
+
     if path is None:
         plt.show()
     else:
@@ -108,23 +110,23 @@ def plot_mask_2(images, masks, attention_maps, predictions, path=None, dpi=300):
     fig, axs = plt.subplots(2 + 2 * n_channels, n, figsize=(n, 2 + 2 * n_channels))
     for i, (image, mask, attention_map, prediction) in enumerate(zip(images, masks, attention_maps, predictions)):
         axs[0][i].imshow(plotable(image))
-        
+
         if mask.dim() == 3:
             mask = mask.squeeze(0)
         mask = mask.type(torch.IntTensor)
         axs[1][i].imshow(markings[mask])
 
         for j, (attention_map_channel, prediction_channel) in enumerate(zip(attention_map, prediction), start=0):
-            axs[2*j+2][i].imshow(plotable(attention_map_channel))
+            axs[2 * j + 2][i].imshow(plotable(attention_map_channel))
             # diffs = (attention_map_channel > 0.5).squeeze(0).type(torch.IntTensor)
             diffs = prediction_channel
             diffs[torch.logical_and(diffs, 1 - mask)] = 3
             diffs[torch.logical_and(1 - diffs, mask)] = 2
-            axs[2*j+3][i].imshow(contours[diffs])
-        
+            axs[2 * j + 3][i].imshow(contours[diffs])
+
         for j in range(2 + 2 * n_channels):
             axs[j][i].axis("off")
-    
+
     if path is None:
         plt.show()
     else:

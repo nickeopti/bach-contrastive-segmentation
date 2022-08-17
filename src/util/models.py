@@ -15,6 +15,7 @@ def load_model(version_number: int | str, epoch: int | str, step: int, logs_dir:
     )
     return model
 
+
 def load_log(version_number: int | str, logs_dir: str = os.path.join('logs', DEFAULT_LOGS_DIR)):
     with open(os.path.join(logs_dir, f'version_{version_number}', 'metrics.csv')) as csv_file:
         reader = csv.DictReader(csv_file)

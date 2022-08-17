@@ -19,7 +19,7 @@ def main():
     parser = ArgumentParser()
     train_dataset = src.util.arguments.add_options(parser, 'train_dataset', list(src.data.available_validation_datasets))
     test_dataset = src.util.arguments.add_options(parser, 'test_dataset', list(src.data.available_validation_datasets))
-    
+
     images, masks = map(torch.stack, zip(*list(train_dataset)))
 
     optimal_threshold = max(np.linspace(0, 1, 100), key=lambda t: dice_score(images < t, masks > 0.5))
