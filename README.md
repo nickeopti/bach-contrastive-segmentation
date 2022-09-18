@@ -1,6 +1,17 @@
 # Efficient Self-Supervision using Patch-based Contrastive Learning for Nuclei Segmentation
 
-Source code for framework to self-supervisedly train convolutional neural networks to segment images – or at least learn to recognise features. Primarily developed for and tested on nuclei segmentation in histopathological images.
+Self-supervisedly train _potentially_ well-performing segmentation networks _in minutes_:
+
+![predictions on test data](docs/figures/predictions.png)
+Above figure illustrates segmentation performance on a subset of the test set for [MoNuSeg](https://ieeexplore.ieee.org/document/7872382). In the bottom row, blue indicates correctly segmented nuclei, green indicates false negatives, and red indicates false positives.
+
+Training is done by contrasting patches against each other – iteratively increasing separation between _positive_ and _negative_ patches. Notice the divergence in _patch confidences_ in the following figure – we conjecture that these trends illustrate the fundamental mechanisms making this framework work.
+
+![evolution of confidence during training](docs/figures/contrast.png)
+
+Check [the preprint](https://arxiv.org/pdf/2208.10779.pdf) for further details about the behaviour, performance, and structure of the framework.
+
+This repository contains the source code for framework. It is able to self-supervisedly train convolutional neural networks to segment images – or at least learn to recognise features. Primarily developed for and tested on nuclei segmentation in histopathological images.
 
 ## Develop
 The framework consists of a couple of components, and for each of these multiple different implementations can be used interchangeably. This project has some "magic" behind the scenes to facilitate fast and easy development, exploration, and testing of new implementations for these components. This has made development more efficient, but requires you to follow some processes when researching new implementations.
