@@ -10,7 +10,6 @@ dependencies = [
     "kornia",
     "matplotlib",
     "numpy",
-    "openslide-python",
     "Pillow",
     "pytorch-lightning >= 1.7",
     "scikit-image",
@@ -19,8 +18,9 @@ dependencies = [
     "torchvision",
 ]
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false
 
 [project.scripts]
 train = "src.scripts.train:main"
