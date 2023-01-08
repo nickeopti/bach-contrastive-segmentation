@@ -14,6 +14,7 @@ import src.util.arguments
 import src.util.events
 import src.util.plot
 import torch
+import torch.utils.data
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, Dataset
 
@@ -116,6 +117,68 @@ def setup_plotting() -> None:
     src.util.events.register_event_handler(src.util.events.EventTypes.END_OF_VALIDATION_BATCH, plot_validation_images)
 
 
+def setup_animation(model: src.framework.Model, dataset: torch.utils.data.Dataset) -> None:
+    def plots_path(log_dir: str):
+        return f'{log_dir}/plots'
+
+    def logs(data: src.framework.LoggedInfo):
+        if data.batch_idx != 0:
+            return
+
+        with torch.no_grad():
+            image, _ = dataset[10]
+            images = image.unsqueeze(0)
+
+            attention_maps = model.confidence_network(images)
+            attended_images = torch.stack([images[:, i, None] * attention_maps for i in range(images.shape[1])], dim=2)
+
+            regions_confidence, _ = model.counter.count(attention_maps)
+            regions_entropy, count_shape = model.counter.count(model.sampler.preprocess(attention_maps))
+            sampled_regions = model.sampler.sample(regions_entropy, model.counter.count(attention_maps)[0])
+
+            for image in regions_entropy:
+                for i, channel in enumerate(image):
+                    for region in channel:
+                        with open(os.path.join(model.logger.log_dir, 'animation_log.csv'), 'a') as f:
+                            f.write(f'{model.current_epoch},{i},entropy,{region}\n')
+            for image in regions_confidence:
+                for i, channel in enumerate(image):
+                    for region in channel:
+                        with open(os.path.join(model.logger.log_dir, 'animation_log.csv'), 'a') as f:
+                            f.write(f'{model.current_epoch},{i},confidence,{region}\n')
+
+            def unpack_index(idx):
+                idx = idx.item()
+                row = idx // count_shape[-1]
+                col = idx % count_shape[-1]
+                return row * model.counter.stride, col * model.counter.stride
+
+            to_plot = [
+                (
+                    image,
+                    attention_map,
+                    attended_image,
+                    [list(map(unpack_index, channel_regions)) for channel_regions in positive_regions],
+                    [list(map(unpack_index, channel_regions)) for channel_regions in negative_regions],
+                    model.counter.kernel_size,
+                )
+                for image, attention_map, attended_image, (positive_regions, negative_regions)
+                in zip(images.cpu(), attention_maps.cpu(), attended_images.cpu(), sampled_regions)
+            ]
+
+            pathlib.Path(plots_path(model.logger.log_dir)).mkdir(parents=True, exist_ok=True)
+            threading.Thread(
+                target=src.util.plot.plot_selected_crops_single,
+                args=(
+                    to_plot,
+                    os.path.join(plots_path(model.logger.log_dir), f'animation_{model.current_epoch}.png'),
+                    600
+                )
+            ).start()
+
+    src.util.events.register_event_handler(src.util.events.EventTypes.END_OF_TRAINING_BATCH, logs)
+
+
 def main() -> None:
     parser = ArgumentParser()
     train_dataset, validation_dataset, sampler, similarity_measure, confidence_network, featuriser_network, args = get_arguments(parser)
@@ -132,6 +195,7 @@ def main() -> None:
     )
 
     setup_plotting()
+    setup_animation(model, validation_dataset)
 
     trainer = create_trainer(args)
     train(model, trainer, train_dataset, validation_dataset, args.batch_size, args.num_workers)

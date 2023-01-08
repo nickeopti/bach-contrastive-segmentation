@@ -68,6 +68,56 @@ def plot_selected_crops(data, path=None, dpi=300):
     plt.close()
 
 
+def plot_selected_crops_single(data, path=None, dpi=300):
+    if len(data) != 1:
+        raise ValueError
+
+    n = min(len(data), 10)
+    n_channels = len(data[0][1])
+    fig, axs = plt.subplots(
+        1 + 2 * n_channels, n, figsize=(n, 1 + 2 * n_channels)
+    )
+    for image, attention_map, attended_image, positive_regions, negative_regions, size in data[:n]:
+        axs[0].imshow(plotable(image))
+        for j in range(n_channels):
+            axs[1 + j].imshow(plotable(attention_map[j]))
+            axs[1 + n_channels + j].imshow(plotable(attended_image[j]))
+
+        for j in range(1, 1 + 2 * n_channels):
+            for row, col in positive_regions[(j - 1) % n_channels]:
+                axs[j].add_patch(
+                    Rectangle(
+                        (col, row),
+                        size,
+                        size,
+                        linewidth=0.5,
+                        edgecolor='white',
+                        facecolor="none",
+                    )
+                )
+            for row, col in negative_regions[(j - 1) % n_channels]:
+                axs[j].add_patch(
+                    Rectangle(
+                        (col, row),
+                        size,
+                        size,
+                        linewidth=0.5,
+                        edgecolor='red',
+                        facecolor="none",
+                    )
+                )
+
+        for j in range(1 + 2 * n_channels):
+            axs[j].axis("off")
+
+    if path is None:
+        plt.show()
+    else:
+        fig.tight_layout()
+        fig.savefig(path, dpi=dpi)
+    plt.close()
+
+
 markings = np.array([(0, 0, 0, 0), (0, 255, 50, 255)])
 contours = np.array([(0, 0, 0, 0), (0, 0, 255, 255), (0, 255, 0, 255), (255, 0, 0, 255)])
 
