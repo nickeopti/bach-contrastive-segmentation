@@ -1,13 +1,13 @@
-from enum import Enum, auto
 import glob
 import importlib
 import pathlib
-from typing import Type
+from enum import Enum, auto
+from typing import Set, Type
 
 from torch.utils.data import Dataset
 
-available_datasets: set[Type[Dataset]] = set()
-available_validation_datasets: set[Type[Dataset]] = set()
+available_datasets: Set[Type[Dataset]] = set()
+available_validation_datasets: Set[Type[Dataset]] = set()
 
 
 class DatasetType(Enum):

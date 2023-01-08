@@ -1,6 +1,6 @@
 from collections import defaultdict
 from enum import Enum, auto
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List
 
 
 class EventTypes(Enum):
@@ -8,7 +8,7 @@ class EventTypes(Enum):
     END_OF_VALIDATION_BATCH = auto()
 
 
-event_handlers: dict[EventTypes, list[Callable[[Any], Any]]] = defaultdict(list)
+event_handlers: Dict[EventTypes, List[Callable[[Any], Any]]] = defaultdict(list)
 
 
 def register_event_handler(event_type: EventTypes, handler: Callable[[Any], Any]) -> None:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Sequence, Tuple, Union
+from typing import Callable, Dict, Sequence, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -74,7 +74,7 @@ class Model(pl.LightningModule):
         featuriser_network: nn.Module,
         inter_channel_loss_scaling_factor: float = 1,
         learning_rate: float = 0.0002,
-        info_to_log: dict[str, str] = {},  # logged as hyperparameters by self.save_hyperparameters call
+        info_to_log: Dict[str, str] = {},  # logged as hyperparameters by self.save_hyperparameters call
     ):
         super().__init__()
         self.save_hyperparameters()
